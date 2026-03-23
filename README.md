@@ -1,3 +1,7 @@
+# @kallinen/thunk-utility
+
+This library provides a clean strongly typed way to use Thunks with Redux Toolkit.
+
 ### Usage
 
 ```js
@@ -20,7 +24,7 @@ export const thunks = createThunks({
             name: 'Alice',
         }
     },
-})
+}, 'ui')
 
 // Define slice
 const uiSlice = createSlice({
