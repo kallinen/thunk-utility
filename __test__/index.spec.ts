@@ -1,4 +1,4 @@
-import { createThunkFactory } from './'
+import { createThunkFactory } from '../src'
 import { configureStore } from '@reduxjs/toolkit'
 
 const store = configureStore({
