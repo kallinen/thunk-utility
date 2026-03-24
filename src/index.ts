@@ -1,8 +1,13 @@
 import {
+    ActionReducerMapBuilder,
     AsyncThunk,
     AsyncThunkConfig,
     AsyncThunkPayloadCreator,
+    CaseReducer,
     createAsyncThunk,
+    Draft,
+    isAnyOf,
+    PayloadAction,
 } from '@reduxjs/toolkit'
 
 type PayloadOf<T> = T extends AsyncThunkPayloadCreator<infer P, any, any>
@@ -53,5 +58,49 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
         M extends Record<string, AsyncThunkPayloadCreator<any, any, Config>>
     >(map: M, namespace?: string) {
         return createThunks<M, Config>(map, namespace)
+    }
+}
+
+type AsyncState = 'fulfilled' | 'pending' | 'rejected'
+
+type FulfilledPayload<T> = T extends { fulfilled: (...args: any) => infer A }
+    ? A extends PayloadAction<infer P>
+        ? P
+        : never
+    : never
+
+type MapThunkToState<S, T extends Record<string, any>> = Partial<{
+    [K in keyof T]: {
+        [SK in keyof S]: FulfilledPayload<T[K]> extends NonNullable<S[SK]>
+            ? SK
+            : never
+    }[keyof S]
+}>
+
+export function sliceHelper<
+    S,
+    M extends ActionMap,
+    DefaultCfg
+>(
+    builder: ActionReducerMapBuilder<S>,
+    thunks: ThunksOf<M, DefaultCfg>
+) {
+    return {
+        forEach: (state: AsyncState, reducer: CaseReducer<S>) => {
+            const thunkMatchers = Object.entries(thunks).map(([_, thunk]) => thunk[state])
+            builder.addMatcher(isAnyOf(...thunkMatchers), reducer)
+        },
+        mapThunksToState: (state: AsyncState, map: MapThunkToState<S, ThunksOf<M, DefaultCfg>>) => {
+            Object.entries(map).forEach(([thunkName, stateKey]) => {
+                const thunk = thunks[thunkName]
+
+                builder.addCase(
+                    thunk[state],
+                    (stateObj: Draft<S>, action: PayloadAction<any>) => {
+                        stateObj[stateKey as keyof Draft<S>] = action.payload
+                    }
+                )
+            })
+        },
     }
 }
