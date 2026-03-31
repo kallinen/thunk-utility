@@ -54,10 +54,50 @@ function createThunks<M extends ActionMap, DefaultCfg>(
 }
 
 export function createThunkFactory<Config extends AsyncThunkConfig>() {
-    return function createBoundThunks<
-        M extends Record<string, AsyncThunkPayloadCreator<any, any, Config>>
-    >(map: M, namespace?: string) {
-        return createThunks<M, Config>(map, namespace)
+    function apiThunkFor<R, P extends any[]>(
+        apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
+    ) {
+        return function(map: {
+            params?: (arg: Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>, state: Config['state']) => P[0]
+            body?: (arg: Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>, state: Config['state']) => P[1]
+            config?: (arg: Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>, state: Config['state']) => P[2]
+        }): AsyncThunkPayloadCreator<R, Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>, Config> {
+            return (async (arg, { rejectWithValue, getState }) => {
+                const state = getState() as Config['state']
+                const response = await (apiFn as (...args: any[]) => Promise<{ ok: true; data: R } | { ok: false; problem: any }>)(
+                    map.params?.(arg, state), map.body?.(arg, state), map.config?.(arg, state)
+                )
+                if (response.ok) return response.data as R
+                return rejectWithValue(response.problem, {} as any)
+            }) as AsyncThunkPayloadCreator<R, Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>, Config>
+        }
+    }
+
+    function customApiThunkFor<R, P extends any[]>(
+        apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
+    ) {
+        return function<ExplicitArg extends Record<string, any>>(map: {
+            params?: (arg: ExplicitArg, state: Config['state']) => P[0]
+            body?: (arg: ExplicitArg, state: Config['state']) => P[1]
+            config?: (arg: ExplicitArg, state: Config['state']) => P[2]
+        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
+            return (async (arg, { rejectWithValue, getState }) => {
+                const state = getState() as Config['state']
+                const response = await (apiFn as (...args: any[]) => Promise<{ ok: true; data: R } | { ok: false; problem: any }>)(
+                    map.params?.(arg, state), map.body?.(arg, state), map.config?.(arg, state)
+                )
+                if (response.ok) return response.data as R
+                return rejectWithValue(response.problem, {} as any)
+            }) as AsyncThunkPayloadCreator<R, ExplicitArg, Config>
+        }
+    }
+
+    return {
+        createThunks: function<M extends Record<string, AsyncThunkPayloadCreator<any, any, Config>>>(map: M, namespace?: string) {
+            return createThunks<M, Config>(map, namespace)
+        },
+        apiThunkFor,
+        customApiThunkFor,
     }
 }
 
@@ -77,20 +117,21 @@ type MapThunkToState<S, T extends Record<string, any>> = Partial<{
     }[keyof S]
 }>
 
-export function sliceHelper<
-    S,
-    M extends ActionMap,
-    DefaultCfg
->(
+export function sliceHelper<S, M extends ActionMap, DefaultCfg>(
     builder: ActionReducerMapBuilder<S>,
     thunks: ThunksOf<M, DefaultCfg>
 ) {
     return {
         forEach: (state: AsyncState, reducer: CaseReducer<S>) => {
-            const thunkMatchers = Object.entries(thunks).map(([_, thunk]) => thunk[state])
+            const thunkMatchers = Object.entries(thunks).map(
+                ([_, thunk]) => thunk[state]
+            )
             builder.addMatcher(isAnyOf(...thunkMatchers), reducer)
         },
-        mapThunksToState: (state: AsyncState, map: MapThunkToState<S, ThunksOf<M, DefaultCfg>>) => {
+        mapThunksToState: (
+            state: AsyncState,
+            map: MapThunkToState<S, ThunksOf<M, DefaultCfg>>
+        ) => {
             Object.entries(map).forEach(([thunkName, stateKey]) => {
                 const thunk = thunks[thunkName]
 
@@ -104,3 +145,18 @@ export function sliceHelper<
         },
     }
 }
+
+type OnlyObject<T> = Extract<T, Record<string, any>>
+
+type Merge<A, B> =
+    [A] extends [never]
+        ? B
+        : [B] extends [never]
+        ? A
+        : {
+              [K in keyof A | keyof B]: K extends keyof B
+                  ? B[K]
+                  : K extends keyof A
+                  ? A[K]
+                  : never
+          }

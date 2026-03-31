@@ -2,7 +2,7 @@ import { createThunkFactory } from '../src'
 import { configureStore } from '@reduxjs/toolkit'
 
 const store = configureStore({
-  reducer: (state: TestState = { value: 0 }) => state,
+    reducer: (state: TestState = { value: 0 }) => state,
 })
 
 type Dispatch = typeof store.dispatch
@@ -24,11 +24,11 @@ type TestConfig = {
 /**
  * Create factory
  */
-const createTestThunks = createThunkFactory<TestConfig>()
+const { createThunks } = createThunkFactory<TestConfig>()
 
 describe('createThunkFactory (typing + runtime)', () => {
     it('should create thunks with correct runtime shape', () => {
-        const thunks = createTestThunks({
+        const thunks = createThunks({
             test: async (arg: number) => {
                 return arg * 2
             },
@@ -42,7 +42,7 @@ describe('createThunkFactory (typing + runtime)', () => {
     })
 
     it('should infer return type correctly', async () => {
-        const thunks = createTestThunks({
+        const thunks = createThunks({
             test: async (arg: number) => {
                 return arg * 2
             },
@@ -56,7 +56,7 @@ describe('createThunkFactory (typing + runtime)', () => {
     })
 
     it('should type thunk API correctly (state + dispatch + rejectValue)', () => {
-        const thunks = createTestThunks({
+        const thunks = createThunks({
             test: async (
                 arg: number,
                 { getState, dispatch, rejectWithValue }
@@ -78,7 +78,7 @@ describe('createThunkFactory (typing + runtime)', () => {
     })
 
     it('should enforce argument types', () => {
-        const thunks = createTestThunks({
+        const thunks = createThunks({
             test: async (arg: number) => arg,
         })
 
@@ -90,7 +90,7 @@ describe('createThunkFactory (typing + runtime)', () => {
     })
 
     it('should infer payload type correctly', () => {
-        const thunks = createTestThunks({
+        const thunks = createThunks({
             test: async (_: void) => {
                 return { ok: true as const }
             },
@@ -107,44 +107,44 @@ describe('createThunkFactory (typing + runtime)', () => {
 })
 
 describe('createThunks namespace support', () => {
-  it('should generate thunks with correct typePrefix when no namespace is given', () => {
-    const thunks = createTestThunks({
-      myAction: async () => 123,
+    it('should generate thunks with correct typePrefix when no namespace is given', () => {
+        const thunks = createThunks({
+            myAction: async () => 123,
+        })
+
+        expect(thunks.myAction.typePrefix).toBe('myAction')
+        expect(thunks.myAction.pending.type).toBe('myAction/pending')
+        expect(thunks.myAction.fulfilled.type).toBe('myAction/fulfilled')
+        expect(thunks.myAction.rejected.type).toBe('myAction/rejected')
     })
 
-    expect(thunks.myAction.typePrefix).toBe('myAction')
-    expect(thunks.myAction.pending.type).toBe('myAction/pending')
-    expect(thunks.myAction.fulfilled.type).toBe('myAction/fulfilled')
-    expect(thunks.myAction.rejected.type).toBe('myAction/rejected')
-  })
+    it('should generate thunks with correct typePrefix when a namespace is provided', () => {
+        const thunks = createThunks(
+            {
+                fetchData: async () => 'ok',
+            },
+            'user'
+        )
 
-  it('should generate thunks with correct typePrefix when a namespace is provided', () => {
-    const thunks = createTestThunks(
-      {
-        fetchData: async () => 'ok',
-      },
-      'user'
-    )
+        expect(thunks.fetchData.typePrefix).toBe('user/fetchData')
+        expect(thunks.fetchData.pending.type).toBe('user/fetchData/pending')
+        expect(thunks.fetchData.fulfilled.type).toBe('user/fetchData/fulfilled')
+        expect(thunks.fetchData.rejected.type).toBe('user/fetchData/rejected')
+    })
 
-    expect(thunks.fetchData.typePrefix).toBe('user/fetchData')
-    expect(thunks.fetchData.pending.type).toBe('user/fetchData/pending')
-    expect(thunks.fetchData.fulfilled.type).toBe('user/fetchData/fulfilled')
-    expect(thunks.fetchData.rejected.type).toBe('user/fetchData/rejected')
-  })
+    it('should generate multiple namespaced thunks correctly', () => {
+        const thunks = createThunks(
+            {
+                load: async () => 1,
+                save: async () => 2,
+            },
+            'app'
+        )
 
-  it('should generate multiple namespaced thunks correctly', () => {
-    const thunks = createTestThunks(
-      {
-        load: async () => 1,
-        save: async () => 2,
-      },
-      'app'
-    )
+        expect(thunks.load.typePrefix).toBe('app/load')
+        expect(thunks.save.typePrefix).toBe('app/save')
 
-    expect(thunks.load.typePrefix).toBe('app/load')
-    expect(thunks.save.typePrefix).toBe('app/save')
-
-    expect(thunks.load.pending.type).toBe('app/load/pending')
-    expect(thunks.save.fulfilled.type).toBe('app/save/fulfilled')
-  })
+        expect(thunks.load.pending.type).toBe('app/load/pending')
+        expect(thunks.save.fulfilled.type).toBe('app/save/fulfilled')
+    })
 })
