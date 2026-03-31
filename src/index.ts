@@ -84,7 +84,7 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
     function customApiThunkFor<R, P extends any[]>(
         apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
     ) {
-        return function <ExplicitArg extends Record<string, any>>(map: {
+        return function <ExplicitArg extends Record<string, any> | void>(map: {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
