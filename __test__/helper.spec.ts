@@ -15,9 +15,9 @@ describe('sliceHelper (reducers)', () => {
         rejectValue: string
     }
 
-    const createTestThunks = createThunkFactory<TestConfig>()
+    const { createThunks } = createThunkFactory<TestConfig>()
 
-    const thunks = createTestThunks({
+    const thunks = createThunks({
         getProducts: async (_: void) => [1, 2, 3],
         getCustomerInfo: async (_: void) => ({ name: 'Alice' }),
     })
