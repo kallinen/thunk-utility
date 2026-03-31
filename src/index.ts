@@ -61,7 +61,7 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
             params?: (arg: ThunkArg<P>, state: Config['state']) => P[0]
             body?: (arg: ThunkArg<P>, state: Config['state']) => P[1]
             config?: (arg: ThunkArg<P>, state: Config['state']) => P[2]
-        }): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
+        } = {}): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
@@ -88,7 +88,7 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
-        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
+        } = {}): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
