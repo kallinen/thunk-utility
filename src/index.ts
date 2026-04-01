@@ -34,34 +34,57 @@ type ThunksOf<M extends ActionMap, DefaultCfg> = {
     >
 }
 
-function createThunks<M extends ActionMap, DefaultCfg>(
-    actionTypes: M,
-    namespace?: string
-): ThunksOf<M, DefaultCfg> {
-    const result = {} as ThunksOf<M, DefaultCfg>
-    for (const k in actionTypes) {
-        const key = k as keyof M
-        result[key] = createAsyncThunk<
-            PayloadOf<M[typeof key]>,
-            ArgOf<M[typeof key]>,
-            CfgOf<M[typeof key], DefaultCfg>
-        >(namespace ? `${namespace}/${k}` : k, actionTypes[key]) as ThunksOf<
-            M,
-            DefaultCfg
-        >[typeof key]
-    }
-    return result
-}
+type OnlyObject<T> = Extract<T, Record<string, any>>
+
+type Merge<A, B> = [A] extends [never]
+    ? B
+    : [B] extends [never]
+    ? A
+    : {
+          [K in keyof A | keyof B]: K extends keyof B
+              ? B[K]
+              : K extends keyof A
+              ? A[K]
+              : never
+      }
+
+type ThunkArg<P extends any[]> = Merge<
+    OnlyObject<NonNullable<P[0]>>,
+    OnlyObject<NonNullable<P[1]>>
+> extends never
+    ? void
+    : Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>
 
 export function createThunkFactory<Config extends AsyncThunkConfig>() {
+    function createThunks<M extends ActionMap, DefaultCfg>(
+        actionTypes: M,
+        namespace?: string
+    ): ThunksOf<M, DefaultCfg> {
+        const result = {} as ThunksOf<M, DefaultCfg>
+        for (const k in actionTypes) {
+            const key = k as keyof M
+            result[key] = createAsyncThunk<
+                PayloadOf<M[typeof key]>,
+                ArgOf<M[typeof key]>,
+                CfgOf<M[typeof key], DefaultCfg>
+            >(
+                namespace ? `${namespace}/${k}` : k,
+                actionTypes[key]
+            ) as ThunksOf<M, DefaultCfg>[typeof key]
+        }
+        return result
+    }
+
     function apiThunkFor<R, P extends any[]>(
         apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
     ) {
-        return function (map: {
-            params?: (arg: ThunkArg<P>, state: Config['state']) => P[0]
-            body?: (arg: ThunkArg<P>, state: Config['state']) => P[1]
-            config?: (arg: ThunkArg<P>, state: Config['state']) => P[2]
-        } = {}): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
+        return function (
+            map: {
+                params?: (arg: ThunkArg<P>, state: Config['state']) => P[0]
+                body?: (arg: ThunkArg<P>, state: Config['state']) => P[1]
+                config?: (arg: ThunkArg<P>, state: Config['state']) => P[2]
+            } = {}
+        ): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
@@ -84,11 +107,13 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
     function customApiThunkFor<R, P extends any[]>(
         apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
     ) {
-        return function <ExplicitArg extends Record<string, any> | void>(map: {
-            params?: (arg: ExplicitArg, state: Config['state']) => P[0]
-            body?: (arg: ExplicitArg, state: Config['state']) => P[1]
-            config?: (arg: ExplicitArg, state: Config['state']) => P[2]
-        } = {}): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
+        return function <ExplicitArg>(
+            map: {
+                params?: (arg: ExplicitArg, state: Config['state']) => P[0]
+                body?: (arg: ExplicitArg, state: Config['state']) => P[1]
+                config?: (arg: ExplicitArg, state: Config['state']) => P[2]
+            } = {}
+        ): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
@@ -163,24 +188,3 @@ export function sliceHelper<S, M extends ActionMap, DefaultCfg>(
         },
     }
 }
-
-type OnlyObject<T> = Extract<T, Record<string, any>>
-
-type Merge<A, B> = [A] extends [never]
-    ? B
-    : [B] extends [never]
-    ? A
-    : {
-          [K in keyof A | keyof B]: K extends keyof B
-              ? B[K]
-              : K extends keyof A
-              ? A[K]
-              : never
-      }
-
-type ThunkArg<P extends any[]> = Merge<
-    OnlyObject<NonNullable<P[0]>>,
-    OnlyObject<NonNullable<P[1]>>
-> extends never
-    ? void
-    : Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>
