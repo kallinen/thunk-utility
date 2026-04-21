@@ -36,9 +36,7 @@ const { createThunks, apiThunkFor, customApiThunkFor } = createThunkFactory<Thun
 // Define thunks
 export const thunks = createThunks({
     // generate simple thunks from API
-    simpleThunk: apiThunkFor(api.hello)({
-        body: (params) => ({ platform: params.platform }),
-    }),
+    simpleThunk: apiThunkFor(api.hello)(),
     customThunk: customApiThunkFor(api.hello)<{ customParam: string }>({
         body: ({ customParam }, state) => ({ platform: state.myReducer.platform, customParam })
     })
