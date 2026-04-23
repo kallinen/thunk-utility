@@ -24,12 +24,8 @@ describe('apiThunkFor', () => {
     }>()
 
     const thunks = createThunks({
-        getProducts: apiThunkFor(mockApiFn)({
-            body: (arg) => arg,
-        }),
-        getCustomerInfo: apiThunkFor(mockApiFn)({
-            body: (arg) => arg,
-        }),
+        getProducts: apiThunkFor(mockApiFn)(),
+        getCustomerInfo: apiThunkFor(mockApiFn)(),
     })
 
     let store: ReturnType<typeof configureStore<TestState>>
@@ -86,42 +82,6 @@ describe('apiThunkFor', () => {
         expect((result as any).payload).toBe('SERVER_ERROR')
     })
 
-    it('should call apiFn with mapped body', async () => {
-        mockApiFn.mockResolvedValue({ ok: true, data: [] })
-
-        const thunksWithBody = createThunks({
-            test: apiThunkFor(mockApiFn)({
-                body: (arg) => ({
-                    platform: arg.platform,
-                }),
-            }),
-        })
-
-        await store.dispatch(thunksWithBody.test({ platform: 'ios' }))
-        expect(mockApiFn).toHaveBeenCalledWith(
-            undefined,
-            { platform: 'ios' },
-            undefined
-        )
-    })
-
-    it('should call apiFn with mapped params', async () => {
-        mockApiFn.mockResolvedValue({ ok: true, data: [] })
-
-        const thunksWithParams = createThunks({
-            test: apiThunkFor(mockApiFn)({
-                params: (arg) => ({ id: arg.id }),
-            }),
-        })
-
-        await store.dispatch(thunksWithParams.test({ id: '123' }))
-        expect(mockApiFn).toHaveBeenCalledWith(
-            { id: '123' },
-            undefined,
-            undefined
-        )
-    })
-
     it('should set fetching to true while pending', async () => {
         let resolveFn!: (v: any) => void
         mockApiFn.mockReturnValue(
@@ -166,6 +126,103 @@ describe('apiThunkFor', () => {
 
         await store.dispatch(thunks.getProducts({}))
         expect(store.getState().products).toEqual([])
+    })
+
+    it('splits params and body correctly', async () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+
+        Object.defineProperty(apiFn, '__meta', {
+            value: { key: 'testOp' },
+        })
+
+        const apiMetadata = {
+            testOp: {
+                paramsKeys: ['id'],
+                queryKeys: ['page'],
+                bodyKeys: ['name'],
+            },
+        }
+
+        const factory = createThunkFactory(apiMetadata)
+        const thunk = factory.apiThunkFor(apiFn)()
+
+        await thunk({ id: 1, page: 2, name: 'John' }, {
+            rejectWithValue: jest.fn(),
+            getState: () => ({}),
+        } as any)
+
+        expect(apiFn).toHaveBeenCalledWith(
+            { id: 1, page: 2 }, // params
+            { name: 'John' }, // body
+            undefined
+        )
+    })
+
+    it('returns undefined when no params/body', async () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+
+        Object.defineProperty(apiFn, '__meta', {
+            value: { key: 'emptyOp' },
+        })
+
+        const apiMetadata = {
+            emptyOp: {
+                paramsKeys: [],
+                queryKeys: [],
+                bodyKeys: [],
+            },
+        }
+
+        const factory = createThunkFactory(apiMetadata)
+        const thunk = factory.apiThunkFor(apiFn)()
+
+        await thunk({}, {
+            rejectWithValue: jest.fn(),
+            getState: () => ({}),
+        } as any)
+
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
+    })
+    it('handles only params without body', async () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+
+        Object.defineProperty(apiFn, '__meta', {
+            value: { key: 'paramsOnly' },
+        })
+
+        const apiMetadata = {
+            paramsOnly: {
+                paramsKeys: ['id'],
+                queryKeys: [],
+                bodyKeys: [],
+            },
+        }
+
+        const factory = createThunkFactory(apiMetadata)
+        const thunk = factory.apiThunkFor(apiFn)()
+
+        await thunk({ id: 123 }, {
+            rejectWithValue: jest.fn(),
+            getState: () => ({}),
+        } as any)
+
+        expect(apiFn).toHaveBeenCalledWith({ id: 123 }, undefined, undefined)
+    })
+    it('handles undefined arg safely', async () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+
+        const factory = createThunkFactory({})
+        const thunk = factory.apiThunkFor(apiFn)()
+
+        await thunk(
+            undefined as any,
+            {
+                rejectWithValue: jest.fn(),
+                getState: () => ({}),
+            } as any
+        )
+
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
     })
 })
 

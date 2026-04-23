@@ -55,7 +55,18 @@ type ThunkArg<P extends any[]> = Merge<
     ? void
     : Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>
 
-export function createThunkFactory<Config extends AsyncThunkConfig>() {
+type ApiMetaShape = Record<
+    string,
+    {
+        paramsKeys: readonly string[]
+        queryKeys: readonly string[]
+        bodyKeys: readonly string[]
+    }
+>
+
+export function createThunkFactory<Config extends AsyncThunkConfig>(
+    apiMetadata: ApiMetaShape = {}
+) {
     function createThunks<M extends ActionMap, DefaultCfg>(
         actionTypes: M,
         namespace?: string
@@ -78,26 +89,62 @@ export function createThunkFactory<Config extends AsyncThunkConfig>() {
     function apiThunkFor<R, P extends any[]>(
         apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
     ) {
-        return function (
-            map: {
-                params?: (arg: ThunkArg<P>, state: Config['state']) => P[0]
-                body?: (arg: ThunkArg<P>, state: Config['state']) => P[1]
-                config?: (arg: ThunkArg<P>, state: Config['state']) => P[2]
-            } = {}
-        ): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
+        const pick = <T extends object>(obj: T, keys: readonly string[]) => {
+            const out: Partial<T> = {}
+            for (const k of keys) {
+                if (k in obj) out[k as keyof T] = obj[k as keyof T]
+            }
+            return out
+        }
+
+        return function (): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
-                const state = getState() as Config['state']
+                const metaKey = (apiFn as any).__meta?.key
+                const fnParamsSplit: ApiMetaShape[string] = (metaKey &&
+                    apiMetadata[metaKey]) ?? {
+                    bodyKeys: [],
+                    paramsKeys: [],
+                    queryKeys: [],
+                }
+
+                const paramKeys = [
+                    ...fnParamsSplit.paramsKeys,
+                    ...fnParamsSplit.queryKeys,
+                ]
+
+                const pickableArg = arg ?? {}
+
+                const allKnownKeys = new Set([
+                    ...paramKeys,
+                    ...fnParamsSplit.bodyKeys,
+                ])
+
+                for (const key of Object.keys(pickableArg)) {
+                    if (!allKnownKeys.has(key)) {
+                        console.warn(
+                            `[apiThunkFor]: Unknown key "${key}" passed to ${metaKey}`
+                        )
+                    }
+                }
+
+                const params = pick(pickableArg, paramKeys)
+                const body = pick(pickableArg, fnParamsSplit.bodyKeys)
+
+                const finalParams = Object.keys(params).length
+                    ? params
+                    : undefined
+
+                const finalBody = Object.keys(body).length ? body : undefined
+
+                const finalConfig = undefined
+
                 const response = await (
                     apiFn as (
                         ...args: any[]
                     ) => Promise<
                         { ok: true; data: R } | { ok: false; problem: any }
                     >
-                )(
-                    map.params?.(arg, state),
-                    map.body?.(arg, state),
-                    map.config?.(arg, state)
-                )
+                )(finalParams, finalBody, finalConfig)
                 if (response.ok) return response.data as R
                 return rejectWithValue(response.problem, {} as any)
             }) as AsyncThunkPayloadCreator<R, ThunkArg<P>, Config>
