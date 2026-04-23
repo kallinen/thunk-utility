@@ -201,9 +201,7 @@ type FulfilledPayload<T> = T extends { fulfilled: (...args: any) => infer A }
 
 type MapThunkToState<S, T extends Record<string, any>> = Partial<{
     [K in keyof T]: {
-        [SK in keyof S]: FulfilledPayload<T[K]> extends NonNullable<S[SK]>
-            ? SK
-            : never
+        [SK in keyof S]: FulfilledPayload<T[K]> extends S[SK] ? SK : never
     }[keyof S]
 }>
 
