@@ -48,12 +48,42 @@ type Merge<A, B> = [A] extends [never]
               : never
       }
 
-type ThunkArg<P extends any[]> = Merge<
+/** Primitive param values eligible for the bare-scalar dispatch shortcut. */
+type ScalarParam = string | number | boolean
+
+/** Distributes over each key of `All`, yielding `true` for a key that is the sole one. */
+type EachIsSole<All, K extends All = All> = K extends any
+    ? [Exclude<All, K>] extends [never]
+        ? true
+        : false
+    : never
+
+/** `true` iff `O` has exactly one key. */
+type IsSingleKey<O> = [keyof O] extends [never]
+    ? false
+    : [EachIsSole<keyof O>] extends [true]
+    ? true
+    : false
+
+/**
+ * A single-key operation may be dispatched with the bare param value instead of an object,
+ * provided that value is primitive: `getById(5)` alongside `getById({ id: 5 })`. Multi-key
+ * (or object-valued) operations still require the object form.
+ */
+type WithScalarShortcut<O> = IsSingleKey<O> extends true
+    ? NonNullable<O[keyof O]> extends ScalarParam
+        ? O | NonNullable<O[keyof O]>
+        : O
+    : O
+
+type MergedThunkArg<P extends any[]> = Merge<
     OnlyObject<NonNullable<P[0]>>,
     OnlyObject<NonNullable<P[1]>>
-> extends never
+>
+
+type ThunkArg<P extends any[]> = [MergedThunkArg<P>] extends [never]
     ? void
-    : Merge<OnlyObject<NonNullable<P[0]>>, OnlyObject<NonNullable<P[1]>>>
+    : WithScalarShortcut<MergedThunkArg<P>>
 
 type ApiMetaShape = Record<
     string,
@@ -112,12 +142,18 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
                     ...fnParamsSplit.queryKeys,
                 ]
 
-                const pickableArg = arg ?? {}
+                const knownKeys = [...paramKeys, ...fnParamsSplit.bodyKeys]
 
-                const allKnownKeys = new Set([
-                    ...paramKeys,
-                    ...fnParamsSplit.bodyKeys,
-                ])
+                // A single-param/body operation may be dispatched with a bare scalar instead of
+                // an object; wrap it into the { key: value } shape the split logic expects.
+                const pickableArg: Record<string, any> =
+                    arg !== null && typeof arg === 'object'
+                        ? (arg as Record<string, any>)
+                        : arg !== undefined && knownKeys.length === 1
+                        ? { [knownKeys[0]]: arg }
+                        : {}
+
+                const allKnownKeys = new Set(knownKeys)
 
                 for (const key of Object.keys(pickableArg)) {
                     if (!allKnownKeys.has(key)) {
