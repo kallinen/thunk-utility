@@ -249,8 +249,8 @@ describe('customApiThunkFor', () => {
     }>()
 
     const thunks = createThunks({
-        getResult: customApiThunkFor(mockApiFn)<{ platform: string }>({
-            body: (arg) => ({ platform: arg.platform }),
+        getResult: customApiThunkFor(mockApiFn)({
+            body: (arg: { platform: string }) => ({ platform: arg.platform }),
         }),
     })
 
@@ -326,8 +326,8 @@ describe('customApiThunkFor', () => {
         mockApiFn.mockResolvedValue({ ok: true, data: { id: 1, name: 'test' } })
 
         const thunksWithState = createThunks({
-            test: customApiThunkFor(mockApiFn)<{ platform: string }>({
-                body: (arg, state) => ({
+            test: customApiThunkFor(mockApiFn)({
+                body: (arg: { platform: string }, state) => ({
                     platform: arg.platform,
                     value: state.value,
                 }),

@@ -36,17 +36,15 @@ type ThunksOf<M extends ActionMap, DefaultCfg> = {
 
 type OnlyObject<T> = Extract<T, Record<string, any>>
 
+// `B` wins on overlapping keys. Written as `Omit<A, keyof B> & B` rather than a mapped type
+// over `keyof A | keyof B`: that key-union form is non-homomorphic and strips the `?` optional
+// modifiers, turning every optional body/param prop into a required one. Omit + Pick (homomorphic)
+// and intersection both preserve optionality.
 type Merge<A, B> = [A] extends [never]
     ? B
     : [B] extends [never]
     ? A
-    : {
-          [K in keyof A | keyof B]: K extends keyof B
-              ? B[K]
-              : K extends keyof A
-              ? A[K]
-              : never
-      }
+    : Omit<A, keyof B> & B
 
 /** Primitive param values eligible for the bare-scalar dispatch shortcut. */
 type ScalarParam = string | number | boolean
@@ -94,6 +92,14 @@ type ApiMetaShape = Record<
     }
 >
 
+/** Success payload carried by a response union's `ok: true` branch. */
+type OkDataOf<Res> = Extract<Res, { ok: true }> extends { data: infer D }
+    ? D
+    : never
+
+/** The `ok: false` branch of a response union — the failure `reject` receives. */
+type ErrOf<Res> = Extract<Res, { ok: false }>
+
 export function createThunkFactory<Config extends AsyncThunkConfig>(
     apiMetadata: ApiMetaShape = {}
 ) {
@@ -116,9 +122,12 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
         return result
     }
 
-    function apiThunkFor<R, P extends any[]>(
-        apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
+    function apiThunkFor<Res extends { ok: boolean }, P extends any[]>(
+        apiFn: (...args: P) => Promise<Res>
     ) {
+        type R = OkDataOf<Res>
+        type Err = ErrOf<Res>
+
         const pick = <T extends object>(obj: T, keys: readonly string[]) => {
             const out: Partial<T> = {}
             for (const k of keys) {
@@ -127,8 +136,27 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
             return out
         }
 
-        return function (): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config> {
-            return (async (arg, { rejectWithValue, getState }) => {
+        // `select` optionally projects the success body into the shape you store, e.g.
+        // `{ select: (data) => data.positions }` — its return type becomes the payload type.
+        // `reject` optionally maps the failure (`status`, `problem`, `originalError`, …) into the
+        // reject value; it's a transform, the thunk still rejects. Overloaded, with
+        // the `select` overload FIRST so `{ select, reject }` binds `data` to `R` (a `reject`-first
+        // order would greedily match `select` as an excess prop and collapse `data` to `any`); the
+        // second overload keeps the no-`select` / bare `()` call pinned to `R`.
+        function payloadCreator<T>(options: {
+            select: (data: R) => T
+            reject?: (failure: Err) => Config['rejectValue']
+        }): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config>
+        function payloadCreator(options?: {
+            reject?: (failure: Err) => Config['rejectValue']
+        }): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config>
+        function payloadCreator<T = R>(
+            options: {
+                select?: (data: R) => T
+                reject?: (failure: Err) => Config['rejectValue']
+            } = {}
+        ): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config> {
+            return (async (arg: any, { rejectWithValue }: any) => {
                 const metaKey = (apiFn as any).__meta?.key
                 const fnParamsSplit: ApiMetaShape[string] = (metaKey &&
                     apiMetadata[metaKey]) ?? {
@@ -175,45 +203,85 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
                 const finalConfig = undefined
 
                 const response = await (
-                    apiFn as (
-                        ...args: any[]
-                    ) => Promise<
-                        { ok: true; data: R } | { ok: false; problem: any }
-                    >
+                    apiFn as (...args: any[]) => Promise<any>
                 )(finalParams, finalBody, finalConfig)
-                if (response.ok) return response.data as R
-                return rejectWithValue(response.problem, {} as any)
-            }) as AsyncThunkPayloadCreator<R, ThunkArg<P>, Config>
+                if (response.ok) {
+                    const data = response.data as R
+                    return options.select
+                        ? options.select(data)
+                        : (data as unknown as T)
+                }
+                return rejectWithValue(
+                    options.reject
+                        ? options.reject(response as Err)
+                        : response.problem,
+                    {} as any
+                )
+            }) as AsyncThunkPayloadCreator<T, ThunkArg<P>, Config>
         }
+
+        return payloadCreator
     }
 
-    function customApiThunkFor<R, P extends any[]>(
-        apiFn: (...args: P) => Promise<{ ok: true; data: R } | { ok: false }>
+    function customApiThunkFor<Res extends { ok: boolean }, P extends any[]>(
+        apiFn: (...args: P) => Promise<Res>
     ) {
-        return function <ExplicitArg>(
+        type R = OkDataOf<Res>
+        type Err = ErrOf<Res>
+
+        // Mirrors apiThunkFor: `select` projects the success body (its return becomes the payload
+        // type), `reject` maps the full error response into the reject value. Overloaded with the
+        // `select` overload first (a `reject`-first order would greedily match `select` as an
+        // excess prop and collapse `data` to `any`); `reject` receives the failure. `ExplicitArg`
+        // (the dispatch-arg type) is
+        // inferred by annotating the callback arg (`params: (arg: Foo) => …`) — the annotation form
+        // is the intended usage and makes `select`/`reject` "just work". It can also be passed as
+        // `<Foo>` for a no-`select` call, but that form can't be combined with `select`.
+        function customPayloadCreator<ExplicitArg, T>(map: {
+            params?: (arg: ExplicitArg, state: Config['state']) => P[0]
+            body?: (arg: ExplicitArg, state: Config['state']) => P[1]
+            config?: (arg: ExplicitArg, state: Config['state']) => P[2]
+            select: (data: R) => T
+            reject?: (failure: Err) => Config['rejectValue']
+        }): AsyncThunkPayloadCreator<T, ExplicitArg, Config>
+        function customPayloadCreator<ExplicitArg>(map?: {
+            params?: (arg: ExplicitArg, state: Config['state']) => P[0]
+            body?: (arg: ExplicitArg, state: Config['state']) => P[1]
+            config?: (arg: ExplicitArg, state: Config['state']) => P[2]
+            reject?: (failure: Err) => Config['rejectValue']
+        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config>
+        function customPayloadCreator<ExplicitArg, T = R>(
             map: {
                 params?: (arg: ExplicitArg, state: Config['state']) => P[0]
                 body?: (arg: ExplicitArg, state: Config['state']) => P[1]
                 config?: (arg: ExplicitArg, state: Config['state']) => P[2]
+                select?: (data: R) => T
+                reject?: (failure: Err) => Config['rejectValue']
             } = {}
-        ): AsyncThunkPayloadCreator<R, ExplicitArg, Config> {
+        ): AsyncThunkPayloadCreator<T, ExplicitArg, Config> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
-                    apiFn as (
-                        ...args: any[]
-                    ) => Promise<
-                        { ok: true; data: R } | { ok: false; problem: any }
-                    >
+                    apiFn as (...args: any[]) => Promise<any>
                 )(
                     map.params?.(arg, state),
                     map.body?.(arg, state),
                     map.config?.(arg, state)
                 )
-                if (response.ok) return response.data as R
-                return rejectWithValue(response.problem, {} as any)
-            }) as AsyncThunkPayloadCreator<R, ExplicitArg, Config>
+                if (response.ok) {
+                    const data = response.data as R
+                    return map.select ? map.select(data) : (data as unknown as T)
+                }
+                return rejectWithValue(
+                    map.reject
+                        ? map.reject(response as Err)
+                        : response.problem,
+                    {} as any
+                )
+            }) as AsyncThunkPayloadCreator<T, ExplicitArg, Config>
         }
+
+        return customPayloadCreator
     }
 
     return {

@@ -49,6 +49,55 @@ Given a function call:
 apiThunkFor(api.getUser)()
 ```
 
+## Projecting results: `select`
+
+Both `apiThunkFor` and `customApiThunkFor` take an optional `select` that projects the
+successful response body into the shape you actually store. Its return type becomes the thunk's
+payload type; omit it to keep the whole body. `select` runs only on success.
+
+```ts
+// store the array directly instead of the `{ users }` wrapper
+getUsers: apiThunkFor(api.listUsers)({ select: (data) => data.users ?? [] })
+```
+
+## Handling failures: `reject`
+
+Optional. Receives the **failure** — the `ok: false` response (`status`, `problem`,
+`originalError`, …) — and returns the value stored on the rejected action (`action.payload`).
+It's a transform, not a swallow: the thunk still rejects.
+
+```ts
+loadThing: apiThunkFor(api.getThing)({
+    reject: (failure) => (failure.status === 500 ? 'Backend down' : 'Request failed'),
+})
+```
+
+`select` and `reject` can be combined. In both, the callback argument is fully typed — no
+annotation needed.
+
+## `customApiThunkFor`: two call forms
+
+`customApiThunkFor` maps a dispatch argument onto the API function's params/body/config. There
+are two interchangeable ways to specify the dispatch-arg type:
+
+- **Explicit type argument** — the usual form. Use it whenever you're not projecting with `select`:
+  ```ts
+  customApiThunkFor(api.search)<{ term: string }>({
+      params: (arg) => ({ q: arg.term }),
+  })
+  ```
+- **Annotated argument** — required when you add `select`. Drop `<Arg>` and annotate the
+  callback's argument instead. (TypeScript can't both take an explicit type argument *and* infer
+  the projected payload type, so `<Arg>` + `select` is a compile error — annotate the arg.)
+  ```ts
+  customApiThunkFor(api.search)({
+      params: (arg: { term: string }) => ({ q: arg.term }),
+      select: (data) => data.results,
+  })
+  ```
+
+In both forms `select`'s `data` and `reject`'s `failure` are fully typed.
+
 ## Example
 
 ```ts
