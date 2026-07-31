@@ -3,6 +3,8 @@ import { createThunkFactory, sliceHelper } from '../src'
 
 type ApiResponse<R> = { ok: true; data: R } | { ok: false; problem: any }
 
+const signal = new AbortController().signal
+
 describe('apiThunkFor', () => {
     type TestState = {
         fetching: boolean
@@ -149,12 +151,13 @@ describe('apiThunkFor', () => {
         await thunk({ id: 1, page: 2, name: 'John' }, {
             rejectWithValue: jest.fn(),
             getState: () => ({}),
+            signal,
         } as any)
 
         expect(apiFn).toHaveBeenCalledWith(
             { id: 1, page: 2 }, // params
             { name: 'John' }, // body
-            undefined
+            { signal }
         )
     })
 
@@ -179,9 +182,10 @@ describe('apiThunkFor', () => {
         await thunk({}, {
             rejectWithValue: jest.fn(),
             getState: () => ({}),
+            signal,
         } as any)
 
-        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, { signal })
     })
     it('handles only params without body', async () => {
         const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
@@ -204,9 +208,10 @@ describe('apiThunkFor', () => {
         await thunk({ id: 123 }, {
             rejectWithValue: jest.fn(),
             getState: () => ({}),
+            signal,
         } as any)
 
-        expect(apiFn).toHaveBeenCalledWith({ id: 123 }, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith({ id: 123 }, undefined, { signal })
     })
     it('handles undefined arg safely', async () => {
         const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
@@ -219,10 +224,11 @@ describe('apiThunkFor', () => {
             {
                 rejectWithValue: jest.fn(),
                 getState: () => ({}),
+                signal,
             } as any
         )
 
-        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, { signal })
     })
 })
 
@@ -318,7 +324,7 @@ describe('customApiThunkFor', () => {
         expect(mockApiFn).toHaveBeenCalledWith(
             undefined,
             { platform: 'android' },
-            undefined
+            { signal: expect.any(AbortSignal) }
         )
     })
 
@@ -338,7 +344,7 @@ describe('customApiThunkFor', () => {
         expect(mockApiFn).toHaveBeenCalledWith(
             undefined,
             { platform: 'ios', value: 42 },
-            undefined
+            { signal: expect.any(AbortSignal) }
         )
     })
 

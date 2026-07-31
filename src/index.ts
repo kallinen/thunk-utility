@@ -2,6 +2,7 @@ import {
     ActionReducerMapBuilder,
     AsyncThunk,
     AsyncThunkConfig,
+    AsyncThunkOptions,
     AsyncThunkPayloadCreator,
     CaseReducer,
     createAsyncThunk,
@@ -32,6 +33,17 @@ type ThunksOf<M extends ActionMap, DefaultCfg> = {
         ArgOf<M[K]>,
         CfgOf<M[K], DefaultCfg>
     >
+}
+
+/**
+ * Per-thunk `createAsyncThunk` options (`condition`, `idGenerator`, `serializeError`,
+ * `dispatchConditionRejection`), keyed by thunk name and typed against that thunk's own arg
+ * and config — so `condition(arg, { getState })` is fully typed per entry.
+ */
+type ThunkOptionsOf<M extends ActionMap, DefaultCfg> = {
+    [K in keyof M]?: CfgOf<M[K], DefaultCfg> extends AsyncThunkConfig
+        ? AsyncThunkOptions<ArgOf<M[K]>, CfgOf<M[K], DefaultCfg>>
+        : AsyncThunkOptions<ArgOf<M[K]>>
 }
 
 type OnlyObject<T> = Extract<T, Record<string, any>>
@@ -100,7 +112,25 @@ type OkDataOf<Res> = Extract<Res, { ok: true }> extends { data: infer D }
 /** The `ok: false` branch of a response union — the failure `reject` receives. */
 type ErrOf<Res> = Extract<Res, { ok: false }>
 
-export function createThunkFactory<Config extends AsyncThunkConfig, Failure = any>(
+/**
+ * The api client resolves failures as an `ok: false` response rather than throwing, so a real
+ * throw means something outside that contract broke (an interceptor, a serialization bug, a
+ * transport that never produced a response). We still route it through `reject` so a factory-wide
+ * error normalization applies uniformly — otherwise exactly the failures nobody anticipated would
+ * be the ones that skip it. Shaped like the client's `ApiErrorResponse`, with `status: 0` marking
+ * "no response was received".
+ */
+const thrownAsFailure = (error: unknown) => ({
+    ok: false as const,
+    problem: 'UNKNOWN_ERROR',
+    originalError: error,
+    status: 0,
+})
+
+export function createThunkFactory<
+    Config extends AsyncThunkConfig,
+    Failure = any
+>(
     apiMetadata: ApiMetaShape = {},
     factoryOptions: {
         /**
@@ -111,11 +141,29 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
          * type param to type it (defaults to `any`).
          */
         reject?: (failure: Failure) => Config['rejectValue']
+        /**
+         * Default `createAsyncThunk` options applied to every thunk — e.g. a shared `condition`
+         * that skips dispatch while a request is already in flight. Merged shallowly with the
+         * per-thunk options passed to `createThunks`, which win key-by-key.
+         */
+        thunkOptions?: AsyncThunkOptions<any, Config>
+        /**
+         * Where `apiThunkFor`'s argument-routing warnings go — dispatch arguments it had to drop
+         * because no metadata claimed them. Defaults to `console.warn`; pass your own logger to
+         * redirect it, or `false` to silence it. The library deliberately does not sniff
+         * `NODE_ENV` to decide this for you.
+         */
+        onWarning?: ((message: string) => void) | false
     } = {}
 ) {
+    const warn =
+        factoryOptions.onWarning === undefined
+            ? (message: string) => console.warn(message)
+            : factoryOptions.onWarning
     function createThunks<M extends ActionMap, DefaultCfg>(
         actionTypes: M,
-        namespace?: string
+        namespace?: string,
+        thunkOptions: Partial<Record<keyof M, any>> = {}
     ): ThunksOf<M, DefaultCfg> {
         const result = {} as ThunksOf<M, DefaultCfg>
         for (const k in actionTypes) {
@@ -124,12 +172,28 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
                 PayloadOf<M[typeof key]>,
                 ArgOf<M[typeof key]>,
                 CfgOf<M[typeof key], DefaultCfg>
-            >(
-                namespace ? `${namespace}/${k}` : k,
-                actionTypes[key]
-            ) as ThunksOf<M, DefaultCfg>[typeof key]
+            >(namespace ? `${namespace}/${k}` : k, actionTypes[key], {
+                ...factoryOptions.thunkOptions,
+                ...thunkOptions[key],
+            } as any) as ThunksOf<M, DefaultCfg>[typeof key]
         }
         return result
+    }
+
+    /**
+     * Turn a failure into the thunk's rejected action. `reject` (per-thunk, else the factory
+     * default) maps it; with neither, the payload falls back to the client's `problem` code.
+     */
+    const reject = (
+        failure: any,
+        perThunk: ((failure: any) => any) | undefined,
+        rejectWithValue: (value: any, meta: any) => any
+    ) => {
+        const rejecter = perThunk ?? factoryOptions.reject
+        return rejectWithValue(
+            (rejecter ? rejecter(failure) : failure.problem) as any,
+            {} as any
+        )
     }
 
     function apiThunkFor<Res extends { ok: boolean }, P extends any[]>(
@@ -156,20 +220,32 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
         function payloadCreator<T, RV = Config['rejectValue']>(options: {
             select: (data: R) => T
             reject?: (failure: Err) => RV
-        }): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }>
+        }): AsyncThunkPayloadCreator<
+            T,
+            ThunkArg<P>,
+            Config & { rejectValue: RV }
+        >
         function payloadCreator<RV = Config['rejectValue']>(options?: {
             reject?: (failure: Err) => RV
-        }): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config & { rejectValue: RV }>
+        }): AsyncThunkPayloadCreator<
+            R,
+            ThunkArg<P>,
+            Config & { rejectValue: RV }
+        >
         function payloadCreator<T = R, RV = Config['rejectValue']>(
             options: {
                 select?: (data: R) => T
                 reject?: (failure: Err) => RV
             } = {}
-        ): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }> {
-            return (async (arg: any, { rejectWithValue }: any) => {
+        ): AsyncThunkPayloadCreator<
+            T,
+            ThunkArg<P>,
+            Config & { rejectValue: RV }
+        > {
+            return (async (arg: any, { rejectWithValue, signal }: any) => {
                 const metaKey = (apiFn as any).__meta?.key
-                const fnParamsSplit: ApiMetaShape[string] = (metaKey &&
-                    apiMetadata[metaKey]) ?? {
+                const meta = metaKey ? apiMetadata[metaKey] : undefined
+                const fnParamsSplit: ApiMetaShape[string] = meta ?? {
                     bodyKeys: [],
                     paramsKeys: [],
                     queryKeys: [],
@@ -193,11 +269,23 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
 
                 const allKnownKeys = new Set(knownKeys)
 
-                for (const key of Object.keys(pickableArg)) {
-                    if (!allKnownKeys.has(key)) {
-                        console.warn(
-                            `[apiThunkFor]: Unknown key "${key}" passed to ${metaKey}`
+                if (warn && Object.keys(pickableArg).length) {
+                    // No metadata at all means every key is dropped — report that once, rather
+                    // than emitting a misleading "unknown key" line per key against `undefined`.
+                    if (!meta) {
+                        warn(
+                            `[apiThunkFor]: No api metadata for ${
+                                metaKey ? `"${metaKey}"` : 'this operation'
+                            }; arguments were dropped.`
                         )
+                    } else {
+                        for (const key of Object.keys(pickableArg)) {
+                            if (!allKnownKeys.has(key)) {
+                                warn(
+                                    `[apiThunkFor]: Unknown key "${key}" passed to ${metaKey}`
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -210,23 +298,34 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
 
                 const finalBody = Object.keys(body).length ? body : undefined
 
-                const finalConfig = undefined
-
-                const response = await (
-                    apiFn as (...args: any[]) => Promise<any>
-                )(finalParams, finalBody, finalConfig)
-                if (response.ok) {
-                    const data = response.data as R
-                    return options.select
-                        ? options.select(data)
-                        : (data as unknown as T)
+                // Forward RTK's AbortSignal as the request config so `dispatch(...).abort()`
+                // cancels the in-flight HTTP request, not just the thunk.
+                try {
+                    const response = await (
+                        apiFn as (...args: any[]) => Promise<any>
+                    )(finalParams, finalBody, { signal })
+                    if (response.ok) {
+                        const data = response.data as R
+                        return options.select
+                            ? options.select(data)
+                            : (data as unknown as T)
+                    }
+                    return reject(response, options.reject, rejectWithValue)
+                } catch (error) {
+                    // An abort is RTK's to report — it already races the payload creator against
+                    // the signal, and swallowing it here would mask `meta.aborted`.
+                    if (signal?.aborted) throw error
+                    return reject(
+                        thrownAsFailure(error),
+                        options.reject,
+                        rejectWithValue
+                    )
                 }
-                const rejecter = options.reject ?? factoryOptions.reject
-                return rejectWithValue(
-                    (rejecter ? rejecter(response as any) : response.problem) as any,
-                    {} as any
-                )
-            }) as AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }>
+            }) as AsyncThunkPayloadCreator<
+                T,
+                ThunkArg<P>,
+                Config & { rejectValue: RV }
+            >
         }
 
         return payloadCreator
@@ -246,20 +345,39 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
         // inferred by annotating the callback arg (`params: (arg: Foo) => …`) — the annotation form
         // is the intended usage and makes `select`/`reject` "just work". It can also be passed as
         // `<Foo>` for a no-`select` call, but that form can't be combined with `select`.
-        function customPayloadCreator<ExplicitArg, T, RV = Config['rejectValue']>(map: {
+        function customPayloadCreator<
+            ExplicitArg,
+            T,
+            RV = Config['rejectValue']
+        >(map: {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
             select: (data: R) => T
             reject?: (failure: Err) => RV
-        }): AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }>
-        function customPayloadCreator<ExplicitArg, RV = Config['rejectValue']>(map?: {
+        }): AsyncThunkPayloadCreator<
+            T,
+            ExplicitArg,
+            Config & { rejectValue: RV }
+        >
+        function customPayloadCreator<
+            ExplicitArg,
+            RV = Config['rejectValue']
+        >(map?: {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
             reject?: (failure: Err) => RV
-        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config & { rejectValue: RV }>
-        function customPayloadCreator<ExplicitArg, T = R, RV = Config['rejectValue']>(
+        }): AsyncThunkPayloadCreator<
+            R,
+            ExplicitArg,
+            Config & { rejectValue: RV }
+        >
+        function customPayloadCreator<
+            ExplicitArg,
+            T = R,
+            RV = Config['rejectValue']
+        >(
             map: {
                 params?: (arg: ExplicitArg, state: Config['state']) => P[0]
                 body?: (arg: ExplicitArg, state: Config['state']) => P[1]
@@ -267,26 +385,42 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
                 select?: (data: R) => T
                 reject?: (failure: Err) => RV
             } = {}
-        ): AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }> {
-            return (async (arg, { rejectWithValue, getState }) => {
+        ): AsyncThunkPayloadCreator<
+            T,
+            ExplicitArg,
+            Config & { rejectValue: RV }
+        > {
+            return (async (arg, { rejectWithValue, getState, signal }) => {
                 const state = getState() as Config['state']
-                const response = await (
-                    apiFn as (...args: any[]) => Promise<any>
-                )(
-                    map.params?.(arg, state),
-                    map.body?.(arg, state),
-                    map.config?.(arg, state)
-                )
-                if (response.ok) {
-                    const data = response.data as R
-                    return map.select ? map.select(data) : (data as unknown as T)
+                try {
+                    // `signal` is the base so abort works by default; an explicit `config`
+                    // mapper still wins if it sets its own.
+                    const response = await (
+                        apiFn as (...args: any[]) => Promise<any>
+                    )(map.params?.(arg, state), map.body?.(arg, state), {
+                        signal,
+                        ...map.config?.(arg, state),
+                    })
+                    if (response.ok) {
+                        const data = response.data as R
+                        return map.select
+                            ? map.select(data)
+                            : (data as unknown as T)
+                    }
+                    return reject(response, map.reject, rejectWithValue)
+                } catch (error) {
+                    if (signal?.aborted) throw error
+                    return reject(
+                        thrownAsFailure(error),
+                        map.reject,
+                        rejectWithValue
+                    )
                 }
-                const rejecter = map.reject ?? factoryOptions.reject
-                return rejectWithValue(
-                    (rejecter ? rejecter(response as any) : response.problem) as any,
-                    {} as any
-                )
-            }) as AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }>
+            }) as AsyncThunkPayloadCreator<
+                T,
+                ExplicitArg,
+                Config & { rejectValue: RV }
+            >
         }
 
         return customPayloadCreator
@@ -295,8 +429,12 @@ export function createThunkFactory<Config extends AsyncThunkConfig, Failure = an
     return {
         createThunks: function <
             M extends Record<string, AsyncThunkPayloadCreator<any, any, Config>>
-        >(map: M, namespace?: string) {
-            return createThunks<M, Config>(map, namespace)
+        >(
+            map: M,
+            namespace?: string,
+            thunkOptions?: ThunkOptionsOf<M, Config>
+        ) {
+            return createThunks<M, Config>(map, namespace, thunkOptions as any)
         },
         apiThunkFor,
         customApiThunkFor,

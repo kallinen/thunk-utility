@@ -11,8 +11,14 @@ const makeThunk = (metaKey: string, meta: Meta) => {
     return { apiFn, thunk: factory.apiThunkFor(apiFn)() }
 }
 
+const signal = new AbortController().signal
+
 const run = (thunk: any, arg: any) =>
-    thunk(arg, { rejectWithValue: jest.fn(), getState: () => ({}) } as any)
+    thunk(arg, {
+        rejectWithValue: jest.fn(),
+        getState: () => ({}),
+        signal,
+    } as any)
 
 describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
     it('wraps a bare scalar into the sole path param', async () => {
@@ -22,7 +28,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: [],
         })
         await run(thunk, 123)
-        expect(apiFn).toHaveBeenCalledWith({ id: 123 }, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith({ id: 123 }, undefined, { signal })
     })
 
     it('wraps a bare scalar into the sole query param', async () => {
@@ -32,7 +38,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: [],
         })
         await run(thunk, 2026)
-        expect(apiFn).toHaveBeenCalledWith({ year: 2026 }, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith({ year: 2026 }, undefined, { signal })
     })
 
     it('wraps a bare scalar into the sole body field', async () => {
@@ -45,7 +51,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
         expect(apiFn).toHaveBeenCalledWith(
             undefined,
             { response: 'attending' },
-            undefined
+            { signal }
         )
     })
 
@@ -56,7 +62,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: [],
         })
         await run(thunk, { id: 7 })
-        expect(apiFn).toHaveBeenCalledWith({ id: 7 }, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith({ id: 7 }, undefined, { signal })
     })
 
     it('handles a falsy-but-valid scalar (0)', async () => {
@@ -66,7 +72,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: [],
         })
         await run(thunk, 0)
-        expect(apiFn).toHaveBeenCalledWith({ id: 0 }, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith({ id: 0 }, undefined, { signal })
     })
 
     it('does not wrap a scalar when there are multiple known keys', async () => {
@@ -76,7 +82,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: ['name'],
         })
         await run(thunk, 5) // ambiguous → ignored
-        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, { signal })
     })
 
     it('ignores a bare scalar when the op has no known keys', async () => {
@@ -86,7 +92,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
             bodyKeys: [],
         })
         await run(thunk, 5)
-        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, undefined)
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, { signal })
     })
 
     it('still splits a multi-key object into params + body', async () => {
@@ -99,7 +105,7 @@ describe('apiThunkFor — single-param scalar shortcut (runtime)', () => {
         expect(apiFn).toHaveBeenCalledWith(
             { id: 1 },
             { name: 'John' },
-            undefined
+            { signal }
         )
     })
 })

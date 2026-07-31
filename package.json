@@ -1,12 +1,38 @@
 {
     "name": "@kallinen/thunk-utility",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "TypeScript library for creating typed thunks.",
     "files": [
         "lib/**/*"
     ],
     "main": "lib/index.js",
+    "module": "lib/index.mjs",
     "types": "lib/index.d.ts",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./lib/index.d.mts",
+                "default": "./lib/index.mjs"
+            },
+            "require": {
+                "types": "./lib/index.d.ts",
+                "default": "./lib/index.js"
+            }
+        },
+        "./lib/index": {
+            "import": {
+                "types": "./lib/index.d.mts",
+                "default": "./lib/index.mjs"
+            },
+            "require": {
+                "types": "./lib/index.d.ts",
+                "default": "./lib/index.js"
+            }
+        },
+        "./lib/*": "./lib/*",
+        "./package.json": "./package.json"
+    },
+    "sideEffects": false,
     "scripts": {
         "build": "tsup --tsconfig tsconfig.production.json src --format cjs,esm --dts --out-dir lib",
         "test": "cross-env NODE_ENV=test jest --detectOpenHandles --config ./jest.config.js --colors --verbose --forceExit",
