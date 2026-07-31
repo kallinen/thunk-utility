@@ -1,4 +1,8 @@
-import { configureStore, createSlice } from '@reduxjs/toolkit'
+import {
+    configureStore,
+    createSlice,
+    type ActionReducerMapBuilder,
+} from '@reduxjs/toolkit'
 import { createThunkFactory, sliceHelper } from '../src'
 
 type ApiResponse<R> = { ok: true; data: R } | { ok: false; problem: any }
@@ -172,11 +176,91 @@ describe('apiThunkFor — select projection (runtime)', () => {
     })
 })
 
+describe('reject value in state (mapThunksToState "rejected")', () => {
+    // A richer response whose failure branch carries `status` (like the real api client).
+    type Resp<R> =
+        | { ok: true; data: R }
+        | { ok: false; problem: string; status: number }
+    type ErrState = {
+        items: number[]
+        error: { code: number; msg: string } | undefined
+    }
+    const initial: ErrState = { items: [], error: undefined }
+
+    it('stores the reject() value on the rejected action, typed by the slot', async () => {
+        const failApi = jest.fn() as jest.Mock<Promise<Resp<ListResponse>>>
+        const { createThunks: ct, apiThunkFor: at } = createThunkFactory<{
+            state: ErrState
+            rejectValue: string
+        }>()
+        const thunks = ct({
+            // `reject`'s return type (an object) overrides the factory-wide `rejectValue: string`
+            // for this thunk, and `failure.status` proves the full failure is in scope.
+            load: at(failApi)({
+                select: (d) => d.items,
+                reject: (failure) => ({
+                    code: failure.status,
+                    msg: `failed: ${failure.problem}`,
+                }),
+            }),
+        })
+        const slice = createSlice({
+            name: 'err',
+            initialState: initial,
+            reducers: {},
+            extraReducers: (builder) => {
+                const helper = sliceHelper(builder, thunks)
+                helper.mapThunksToState('fulfilled', { load: 'items' })
+                helper.mapThunksToState('rejected', { load: 'error' })
+            },
+        })
+        const store = configureStore({ reducer: slice.reducer })
+        failApi.mockResolvedValue({
+            ok: false,
+            problem: 'CLIENT_ERROR',
+            status: 404,
+        })
+        const res = await store.dispatch(thunks.load({}))
+        expect(res.type).toMatch(/rejected$/)
+        expect(store.getState().error).toEqual({
+            code: 404,
+            msg: 'failed: CLIENT_ERROR',
+        })
+    })
+
+    it('applies the factory default reject, overridable per-thunk', async () => {
+        const failApi = jest.fn() as jest.Mock<Promise<Resp<ListResponse>>>
+        const { createThunks: ct, apiThunkFor: at } = createThunkFactory<{
+            state: ErrState
+            rejectValue: string
+        }>({}, { reject: (failure: { problem: string }) => `default: ${failure.problem}` })
+        const thunks = ct({
+            usesDefault: at(failApi)(), // no own reject → inherits the factory default
+            ownReject: at(failApi)({ reject: (f) => `own: ${f.problem}` }),
+        })
+        const slice = createSlice({
+            name: 'def',
+            initialState: initial,
+            reducers: {},
+            extraReducers: (b) => {
+                sliceHelper(b, thunks).forEach('rejected', () => {})
+            },
+        })
+        const store = configureStore({ reducer: slice.reducer })
+        failApi.mockResolvedValue({ ok: false, problem: 'CLIENT_ERROR', status: 404 })
+
+        const a = await store.dispatch(thunks.usesDefault({}))
+        const b = await store.dispatch(thunks.ownReject({}))
+        expect(a.payload).toBe('default: CLIENT_ERROR')
+        expect(b.payload).toBe('own: CLIENT_ERROR')
+    })
+})
+
 // ─── Compile-time type assertions (ts-jest fails the build if any of these break) ───
 
 const paramPlusOptionalBodyApi = (
     _p?: { id: number },
-    _d?: { periodId: number; trainingPlanId?: number },
+    _d?: { myId: number; anotherId?: number },
     _c?: any
 ): Promise<ApiResponse<string>> => Promise.resolve({ ok: true, data: 'x' })
 
@@ -216,9 +300,9 @@ const tt = ctTypes({
 // Never executed — exists purely so its body is type-checked.
 function _typeChecks() {
     // Merge fix: an optional body prop stays optional (before the fix, merging params + body
-    // stripped the `?` and forced trainingPlanId to be present).
-    tt.assign({ id: 1, periodId: 2 })
-    tt.assign({ id: 1, periodId: 2, trainingPlanId: 3 })
+    // stripped the `?` and forced anotherId to be present).
+    tt.assign({ id: 1, myId: 2 })
+    tt.assign({ id: 1, myId: 2, anotherId: 3 })
     // @ts-expect-error — a required body prop is still required
     tt.assign({ id: 1 })
 
@@ -250,5 +334,33 @@ function _typeChecks() {
     // @ts-expect-error — number[], not any/string; fails if data collapsed to any
     const bothWrong: string = null as unknown as BothPayload
     void bothWrong
+
+    // A: reject's return type becomes the thunk's rejected-payload type (per-thunk, overriding
+    // the factory-wide rejectValue). The rejected payload also includes `undefined`.
+    const errThunks = ctTypes({
+        load: atTypes(listApiTyped)({
+            select: (d) => d.items,
+            reject: () => ({ code: 500, msg: 'x' }),
+        }),
+    })
+    type LoadRejected = ReturnType<typeof errThunks.load.rejected>['payload']
+    const lr: { code: number; msg: string } | undefined =
+        null as unknown as LoadRejected
+    void lr
+    // @ts-expect-error — rejected payload is the reject() object (| undefined), not a string
+    const lrWrong: string = null as unknown as LoadRejected
+    void lrWrong
+
+    // B: mapThunksToState is state-aware — fulfilled maps the payload, rejected maps the reject
+    // value, each checked against the slot (builder is compile-only, never executed).
+    type ErrShape = { items: number[]; error: { code: number; msg: string } | undefined }
+    const eb = null as unknown as ActionReducerMapBuilder<ErrShape>
+    const eh = sliceHelper(eb, errThunks)
+    eh.mapThunksToState('fulfilled', { load: 'items' })
+    eh.mapThunksToState('rejected', { load: 'error' })
+    // @ts-expect-error — reject value object doesn't fit the number[] slot
+    eh.mapThunksToState('rejected', { load: 'items' })
+    // @ts-expect-error — fulfilled number[] doesn't fit the error-object slot
+    eh.mapThunksToState('fulfilled', { load: 'error' })
 }
 void _typeChecks

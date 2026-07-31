@@ -100,8 +100,18 @@ type OkDataOf<Res> = Extract<Res, { ok: true }> extends { data: infer D }
 /** The `ok: false` branch of a response union — the failure `reject` receives. */
 type ErrOf<Res> = Extract<Res, { ok: false }>
 
-export function createThunkFactory<Config extends AsyncThunkConfig>(
-    apiMetadata: ApiMetaShape = {}
+export function createThunkFactory<Config extends AsyncThunkConfig, Failure = any>(
+    apiMetadata: ApiMetaShape = {},
+    factoryOptions: {
+        /**
+         * A default `reject` applied to every thunk that doesn't define its own — e.g. normalize
+         * all failures into your app's error type. Must return the factory-wide
+         * `Config['rejectValue']` (set `rejectValue` in your Config to make that type useful).
+         * A per-thunk `reject` overrides it. Annotate `failure` or set the factory's `Failure`
+         * type param to type it (defaults to `any`).
+         */
+        reject?: (failure: Failure) => Config['rejectValue']
+    } = {}
 ) {
     function createThunks<M extends ActionMap, DefaultCfg>(
         actionTypes: M,
@@ -143,19 +153,19 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
         // the `select` overload FIRST so `{ select, reject }` binds `data` to `R` (a `reject`-first
         // order would greedily match `select` as an excess prop and collapse `data` to `any`); the
         // second overload keeps the no-`select` / bare `()` call pinned to `R`.
-        function payloadCreator<T>(options: {
+        function payloadCreator<T, RV = Config['rejectValue']>(options: {
             select: (data: R) => T
-            reject?: (failure: Err) => Config['rejectValue']
-        }): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config>
-        function payloadCreator(options?: {
-            reject?: (failure: Err) => Config['rejectValue']
-        }): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config>
-        function payloadCreator<T = R>(
+            reject?: (failure: Err) => RV
+        }): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }>
+        function payloadCreator<RV = Config['rejectValue']>(options?: {
+            reject?: (failure: Err) => RV
+        }): AsyncThunkPayloadCreator<R, ThunkArg<P>, Config & { rejectValue: RV }>
+        function payloadCreator<T = R, RV = Config['rejectValue']>(
             options: {
                 select?: (data: R) => T
-                reject?: (failure: Err) => Config['rejectValue']
+                reject?: (failure: Err) => RV
             } = {}
-        ): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config> {
+        ): AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }> {
             return (async (arg: any, { rejectWithValue }: any) => {
                 const metaKey = (apiFn as any).__meta?.key
                 const fnParamsSplit: ApiMetaShape[string] = (metaKey &&
@@ -211,13 +221,12 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
                         ? options.select(data)
                         : (data as unknown as T)
                 }
+                const rejecter = options.reject ?? factoryOptions.reject
                 return rejectWithValue(
-                    options.reject
-                        ? options.reject(response as Err)
-                        : response.problem,
+                    (rejecter ? rejecter(response as any) : response.problem) as any,
                     {} as any
                 )
-            }) as AsyncThunkPayloadCreator<T, ThunkArg<P>, Config>
+            }) as AsyncThunkPayloadCreator<T, ThunkArg<P>, Config & { rejectValue: RV }>
         }
 
         return payloadCreator
@@ -237,28 +246,28 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
         // inferred by annotating the callback arg (`params: (arg: Foo) => …`) — the annotation form
         // is the intended usage and makes `select`/`reject` "just work". It can also be passed as
         // `<Foo>` for a no-`select` call, but that form can't be combined with `select`.
-        function customPayloadCreator<ExplicitArg, T>(map: {
+        function customPayloadCreator<ExplicitArg, T, RV = Config['rejectValue']>(map: {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
             select: (data: R) => T
-            reject?: (failure: Err) => Config['rejectValue']
-        }): AsyncThunkPayloadCreator<T, ExplicitArg, Config>
-        function customPayloadCreator<ExplicitArg>(map?: {
+            reject?: (failure: Err) => RV
+        }): AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }>
+        function customPayloadCreator<ExplicitArg, RV = Config['rejectValue']>(map?: {
             params?: (arg: ExplicitArg, state: Config['state']) => P[0]
             body?: (arg: ExplicitArg, state: Config['state']) => P[1]
             config?: (arg: ExplicitArg, state: Config['state']) => P[2]
-            reject?: (failure: Err) => Config['rejectValue']
-        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config>
-        function customPayloadCreator<ExplicitArg, T = R>(
+            reject?: (failure: Err) => RV
+        }): AsyncThunkPayloadCreator<R, ExplicitArg, Config & { rejectValue: RV }>
+        function customPayloadCreator<ExplicitArg, T = R, RV = Config['rejectValue']>(
             map: {
                 params?: (arg: ExplicitArg, state: Config['state']) => P[0]
                 body?: (arg: ExplicitArg, state: Config['state']) => P[1]
                 config?: (arg: ExplicitArg, state: Config['state']) => P[2]
                 select?: (data: R) => T
-                reject?: (failure: Err) => Config['rejectValue']
+                reject?: (failure: Err) => RV
             } = {}
-        ): AsyncThunkPayloadCreator<T, ExplicitArg, Config> {
+        ): AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }> {
             return (async (arg, { rejectWithValue, getState }) => {
                 const state = getState() as Config['state']
                 const response = await (
@@ -272,13 +281,12 @@ export function createThunkFactory<Config extends AsyncThunkConfig>(
                     const data = response.data as R
                     return map.select ? map.select(data) : (data as unknown as T)
                 }
+                const rejecter = map.reject ?? factoryOptions.reject
                 return rejectWithValue(
-                    map.reject
-                        ? map.reject(response as Err)
-                        : response.problem,
+                    (rejecter ? rejecter(response as any) : response.problem) as any,
                     {} as any
                 )
-            }) as AsyncThunkPayloadCreator<T, ExplicitArg, Config>
+            }) as AsyncThunkPayloadCreator<T, ExplicitArg, Config & { rejectValue: RV }>
         }
 
         return customPayloadCreator
@@ -303,9 +311,25 @@ type FulfilledPayload<T> = T extends { fulfilled: (...args: any) => infer A }
         : never
     : never
 
-type MapThunkToState<S, T extends Record<string, any>> = Partial<{
+/**
+ * The payload of a thunk's `rejected` action — the `reject()` value (see apiThunkFor), or
+ * `undefined` when the thunk rejects by throwing instead of via reject()/rejectWithValue.
+ */
+type RejectedPayload<T> = T extends { rejected: (...args: any) => infer A }
+    ? A extends { payload: infer P }
+        ? P
+        : never
+    : never
+
+type MapFulfilledToState<S, T extends Record<string, any>> = Partial<{
     [K in keyof T]: {
         [SK in keyof S]: FulfilledPayload<T[K]> extends S[SK] ? SK : never
+    }[keyof S]
+}>
+
+type MapRejectedToState<S, T extends Record<string, any>> = Partial<{
+    [K in keyof T]: {
+        [SK in keyof S]: RejectedPayload<T[K]> extends S[SK] ? SK : never
     }[keyof S]
 }>
 
@@ -313,27 +337,39 @@ export function sliceHelper<S, M extends ActionMap, DefaultCfg>(
     builder: ActionReducerMapBuilder<S>,
     thunks: ThunksOf<M, DefaultCfg>
 ) {
-    return {
-        forEach: (state: AsyncState, reducer: CaseReducer<S>) => {
-            const thunkMatchers = Object.entries(thunks).map(
-                ([_, thunk]) => thunk[state]
-            )
-            builder.addMatcher(isAnyOf(...thunkMatchers), reducer)
-        },
-        mapThunksToState: (
-            state: AsyncState,
-            map: MapThunkToState<S, ThunksOf<M, DefaultCfg>>
-        ) => {
-            Object.entries(map).forEach(([thunkName, stateKey]) => {
-                const thunk = thunks[thunkName]
-
-                builder.addCase(
-                    thunk[state],
-                    (stateObj: Draft<S>, action: PayloadAction<any>) => {
-                        stateObj[stateKey as keyof Draft<S>] = action.payload
-                    }
-                )
-            })
-        },
+    const forEach = (state: AsyncState, reducer: CaseReducer<S>) => {
+        const thunkMatchers = Object.entries(thunks).map(
+            ([_, thunk]) => thunk[state]
+        )
+        builder.addMatcher(isAnyOf(...thunkMatchers), reducer)
     }
+
+    // Land each listed thunk's payload in a state field. `fulfilled` maps the success payload
+    // (post-`select`); `rejected` maps the reject value (post-`reject`). Each is type-checked
+    // against the target field — and the rejected payload includes `undefined` (a thrown
+    // rejection carries no payload), so error fields must allow `undefined`.
+    function mapThunksToState(
+        state: 'fulfilled',
+        map: MapFulfilledToState<S, ThunksOf<M, DefaultCfg>>
+    ): void
+    function mapThunksToState(
+        state: 'rejected',
+        map: MapRejectedToState<S, ThunksOf<M, DefaultCfg>>
+    ): void
+    function mapThunksToState(
+        state: 'fulfilled' | 'rejected',
+        map: Record<string, any>
+    ): void {
+        Object.entries(map).forEach(([thunkName, stateKey]) => {
+            const thunk = thunks[thunkName]
+            builder.addCase(
+                thunk[state],
+                (stateObj: Draft<S>, action: PayloadAction<any>) => {
+                    stateObj[stateKey as keyof Draft<S>] = action.payload
+                }
+            )
+        })
+    }
+
+    return { forEach, mapThunksToState }
 }

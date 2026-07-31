@@ -162,9 +162,9 @@ describe('sliceHelper.mapThunksToState — payload/slot type guard', () => {
                 helper.mapThunksToState('fulfilled', {
                     nums: 'list', // number[] → number[]
                     info: 'info', // { name } → { name } | null
-                    // @ts-expect-error — string payload matches no slot (value type is never)
-                    str: 'list',
                 })
+                // @ts-expect-error — string payload matches no slot, so the map is rejected
+                helper.mapThunksToState('fulfilled', { str: 'list' })
             },
         })
 
