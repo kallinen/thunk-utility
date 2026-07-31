@@ -1,8 +1,48 @@
 # @kallinen/thunk-utility
 
-Typed Redux Toolkit thunks with minimal boilerplate. Built to pair with
-**@kallinen/openapi-axios-client** — it reads that client's metadata to split arguments and infer
-payload types for you.
+Typed Redux Toolkit thunks. Built to pair with **@kallinen/openapi-axios-client** — it reads that
+client's metadata to split dispatch arguments into params and body.
+
+## Why
+
+Writing Redux Toolkit thunks is repetitive. Most of them call an API function, map the response, and
+update state. This library removes that boilerplate while preserving full type inference.
+
+The guiding principle: **the common path requires no configuration.** Most thunks are just
+`apiThunkFor(api.someEndpoint)()`. When that isn't enough you opt into one small, focused
+customization — `select` for the payload shape, `reject` for errors, `customApiThunkFor` for the
+argument mapping — rather than rewriting the thunk.
+
+This is all it takes to get fully typed thunks:
+
+```ts
+const thunks = createThunks({
+    getUsers: apiThunkFor(api.listUsers)(),
+    getUser: apiThunkFor(api.getUser)(),
+    createUser: apiThunkFor(api.createUser)(),
+    getNames: apiThunkFor(api.listUsers)({
+        select: (data) => data.users,
+    }),
+})
+```
+
+Your IDE already knows exactly what each thunk accepts and what it returns. No payload or response
+types to duplicate — the dispatch argument, fulfilled payload and rejected payload are all inferred
+directly from the generated API definition.
+
+```ts
+dispatch(thunks.getUser(5))
+dispatch(thunks.createUser({
+    teamId: 1,
+    name: 'Ada',
+    email: 'ada@example.com'
+}))
+```
+
+**If your OpenAPI specification changes, the generated client changes. If the client changes, your
+thunks change. If your thunks change, TypeScript tells you exactly where your UI needs attention.**
+
+The result is less boilerplate and fewer opportunities for bugs.
 
 ## Install
 
@@ -12,20 +52,22 @@ npm install @kallinen/thunk-utility
 
 ## Quick start
 
-One factory per app, wired to your store's config and the generated api metadata:
+Everything starts from a single factory. It captures your store's thunk configuration and the
+generated API metadata once, then you reuse it across all your slices:
 
 ```ts
 const { createThunks, apiThunkFor, customApiThunkFor } =
     createThunkFactory<ThunkState>(apiMetadata)
+```
 
+Name the thunks with a namespace, then land results in state with the slice helper — no per-thunk
+reducers:
+
+```ts
 export const thunks = createThunks({
     getUsers: apiThunkFor(api.listUsers)(),
 }, 'users')
-```
 
-Land results in state with the slice helper — no per-thunk reducers:
-
-```ts
 const slice = createSlice({
     name: 'users',
     initialState: { users: null as Users | null, fetching: false },
@@ -39,6 +81,11 @@ const slice = createSlice({
     },
 })
 ```
+
+That's the whole wiring. `mapThunksToState` drops each thunk's payload into a state field, and
+`forEach` runs one reducer across every thunk — here a shared `fetching` flag. `sliceHelper` is a
+plain import from the package, not part of the factory; both methods are covered in full under
+[`sliceHelper`](#slicehelper).
 
 ## `apiThunkFor`
 
@@ -197,8 +244,11 @@ createThunkFactory<ThunkState>(apiMetadata, { onWarning: false })
 
 ## `customApiThunkFor` — custom argument mapping
 
-When the dispatch argument doesn't map 1:1 onto the request, provide `params` / `body` / `config`
-mappers (each also receives the store `state`).
+`apiThunkFor` covers the common case. Use `customApiThunkFor` when the dispatch argument doesn't map
+1:1 onto the request.
+
+Provide `params`, `body` and `config` mappers to build the request manually. Each mapper also
+receives the current Redux state.
 
 ```ts
 // Explicit arg type — the common case
