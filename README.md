@@ -223,9 +223,10 @@ Wraps an api-client function. It reads the function's metadata (`__meta.key` + t
 map) to split one dispatch argument into path/query params and the request body.
 
 ```ts
-// No arguments
+// No arguments — also when every parameter the operation takes is optional
 getUsers: apiThunkFor(api.listUsers)()
 // dispatch(thunks.getUsers())
+// dispatch(thunks.getUsers({ team: 'core' }))   // if it has optional query params
 ```
 
 ```ts

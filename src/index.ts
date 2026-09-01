@@ -80,8 +80,21 @@ type MergedThunkArg<P extends any[]> = Merge<
     OnlyObject<NonNullable<P[1]>>
 >
 
+/**
+ * `true` when every key of `O` is optional — an empty object already satisfies it, so a dispatch
+ * has nothing it is obliged to pass.
+ */
+type IsAllOptional<O> = {} extends O ? true : false
+
+/**
+ * An operation whose parameters are all optional is dispatchable with no argument at all:
+ * `listUsers()` alongside `listUsers({ team: 'x' })`. RTK makes the argument optional as soon as
+ * `void` is part of the union, so that is all this adds.
+ */
 type ThunkArg<P extends any[]> = [MergedThunkArg<P>] extends [never]
     ? void
+    : IsAllOptional<MergedThunkArg<P>> extends true
+    ? WithScalarShortcut<MergedThunkArg<P>> | void
     : WithScalarShortcut<MergedThunkArg<P>>
 
 type ApiMetaShape = Record<

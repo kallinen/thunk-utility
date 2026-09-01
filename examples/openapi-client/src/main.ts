@@ -8,8 +8,8 @@ const main = async () => {
     const server = await startServer()
     const { store, thunks } = buildStore(server.url)
 
-    // `listUsers` has one optional query parameter, so its argument is `{ team?: string }`.
-    await store.dispatch(thunks.listUsers({}))
+    // Every parameter of `listUsers` is optional, so it dispatches with no argument at all.
+    await store.dispatch(thunks.listUsers())
     show('listUsers — payload is data.users, not the envelope', store.getState().users)
 
     // One path parameter, dispatched as a bare value. `thunks.getUser({ id: 1 })` also works.
@@ -35,7 +35,7 @@ const main = async () => {
     })
 
     // Cancellation reaches the HTTP request, not just the thunk.
-    const inFlight = store.dispatch(thunks.listUsers({}))
+    const inFlight = store.dispatch(thunks.listUsers())
     inFlight.abort()
     const aborted = await inFlight
     show('listUsers aborted', {

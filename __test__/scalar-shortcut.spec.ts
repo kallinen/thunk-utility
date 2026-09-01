@@ -136,6 +136,18 @@ const bodyApi = (
     _c?: any
 ): Promise<ApiResponse<string>> => Promise.resolve({ ok: true, data: 'x' })
 
+const allOptionalApi = (
+    _p?: { team?: string; page?: number },
+    _d?: undefined,
+    _c?: any
+): Promise<ApiResponse<string>> => Promise.resolve({ ok: true, data: 'x' })
+
+const optionalPlusRequiredApi = (
+    _p?: { team?: string },
+    _d?: { name: string },
+    _c?: any
+): Promise<ApiResponse<string>> => Promise.resolve({ ok: true, data: 'x' })
+
 const paramPlusBodyApi = (
     _p?: { id: number } | string | number,
     _d?: { name: string },
@@ -153,6 +165,8 @@ const t = createThunks({
     noArg: apiThunkFor(noArgApi)(),
     body: apiThunkFor(bodyApi)(),
     paramPlusBody: apiThunkFor(paramPlusBodyApi)(),
+    allOptional: apiThunkFor(allOptionalApi)(),
+    optionalPlusRequired: apiThunkFor(optionalPlusRequiredApi)(),
 })
 
 // Never executed — this function exists purely so its body is type-checked.
@@ -173,8 +187,52 @@ function _typeChecks() {
     t.single(true)
     // @ts-expect-error — object missing the required key
     t.single({})
+
+    // Every parameter optional → dispatchable with nothing at all, and still with the object.
+    t.singleQuery()
+    t.allOptional()
+    t.allOptional({})
+    t.allOptional({ team: 'x' })
+    t.allOptional({ team: 'x', page: 2 })
+
+    // One required key anywhere in the merge keeps the argument required.
+    t.optionalPlusRequired({ name: 'a' })
+    // @ts-expect-error — `name` is required, so the argument cannot be omitted
+    t.optionalPlusRequired()
+    // @ts-expect-error — still required when the object is present but incomplete
+    t.optionalPlusRequired({ team: 'x' })
 }
 void _typeChecks
+
+describe('apiThunkFor — omitted argument (runtime)', () => {
+    it('sends no params or body when an all-optional arg is omitted', async () => {
+        const { apiFn, thunk } = makeThunk('allOptional', {
+            paramsKeys: [],
+            queryKeys: ['team', 'page'],
+            bodyKeys: [],
+        })
+        await run(thunk, undefined)
+        expect(apiFn).toHaveBeenCalledWith(undefined, undefined, { signal })
+    })
+
+    it('still sends what is given when the arg is partially filled', async () => {
+        const { apiFn, thunk } = makeThunk('allOptional', {
+            paramsKeys: [],
+            queryKeys: ['team', 'page'],
+            bodyKeys: [],
+        })
+        await run(thunk, { team: 'x' })
+        expect(apiFn).toHaveBeenCalledWith({ team: 'x' }, undefined, { signal })
+    })
+
+    it('warns about nothing when the arg is omitted', async () => {
+        const warn = jest.fn()
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+        const factory = createThunkFactory({}, { onWarning: warn })
+        await run(factory.apiThunkFor(apiFn)(), undefined)
+        expect(warn).not.toHaveBeenCalled()
+    })
+})
 
 describe('apiThunkFor — scalar shortcut (types)', () => {
     it('type-level assertions compile', () => {
