@@ -1,7 +1,7 @@
 {
     "name": "@kallinen/thunk-utility",
     "version": "0.9.0",
-    "description": "TypeScript library for creating typed thunks.",
+    "description": "Typed Redux Toolkit thunks without the boilerplate — dispatch arguments, payloads and errors inferred from your API client.",
     "files": [
         "lib/**/*"
     ],
@@ -33,6 +33,9 @@
         "./package.json": "./package.json"
     },
     "sideEffects": false,
+    "engines": {
+        "node": ">=18"
+    },
     "scripts": {
         "build": "tsup --tsconfig tsconfig.production.json src --format cjs,esm --dts --out-dir lib",
         "test": "cross-env NODE_ENV=test jest --detectOpenHandles --config ./jest.config.js --colors --verbose --forceExit",
@@ -43,6 +46,20 @@
         "type": "git",
         "url": "git+https://github.com/kallinen/thunk-utility.git"
     },
+    "keywords": [
+        "redux",
+        "redux-toolkit",
+        "rtk",
+        "createAsyncThunk",
+        "thunk",
+        "async-thunk",
+        "typescript",
+        "openapi",
+        "typed-api-client",
+        "redux-thunk",
+        "api-client",
+        "type-safe"
+    ],
     "author": "Kallinen Solutions Oy",
     "license": "MIT",
     "bugs": {
