@@ -1,6 +1,6 @@
 {
     "name": "@kallinen/thunk-utility",
-    "version": "0.9.1",
+    "version": "0.10.0",
     "description": "Typed Redux Toolkit thunks without the boilerplate — dispatch arguments, payloads and errors inferred from your API client.",
     "files": [
         "lib/**/*"
