@@ -8,24 +8,16 @@
         "skipLibCheck": true,
         "resolveJsonModule": true,
         "noEmit": true,
-        "lib": [
-            "ES2022",
-            "DOM"
-        ],
-        "baseUrl": ".",
+        "lib": ["ES2022", "DOM"],
+        "types": ["node"],
+        // The example links thunk-utility with `file:../..`, which leaves two copies of
+        // @reduxjs/toolkit in the tree — structurally identical, nominally distinct. Pinning the
+        // resolution collapses them. Installing both from npm, as a real app does, needs none of
+        // this. (`paths` without `baseUrl` resolves relative to this file.)
         "paths": {
-            "@reduxjs/toolkit": [
-                "./node_modules/@reduxjs/toolkit"
-            ],
-            "@reduxjs/toolkit/*": [
-                "./node_modules/@reduxjs/toolkit/*"
-            ]
-        },
-        "types": [
-            "node"
-        ]
+            "@reduxjs/toolkit": ["./node_modules/@reduxjs/toolkit"],
+            "@reduxjs/toolkit/*": ["./node_modules/@reduxjs/toolkit/*"]
+        }
     },
-    "include": [
-        "src"
-    ]
+    "include": ["src"]
 }
