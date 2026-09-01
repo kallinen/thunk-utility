@@ -101,6 +101,18 @@ type OkDataOf<Res> = Extract<Res, { ok: true }> extends { data: infer D }
 /** The `ok: false` branch of a response union — the failure `reject` receives. */
 type ErrOf<Res> = Extract<Res, { ok: false }>
 
+/** The success body for this client kind: the `ok: true` branch's data, or axios's `data`. */
+type SuccessOf<Config, Res> = KindOf<Config> extends 'axios'
+    ? Res extends { data: infer D }
+        ? D
+        : never
+    : OkDataOf<Res>
+
+/** What `reject` receives: the `ok: false` branch, or the failure assembled from an AxiosError. */
+type FailureOf<Config, Res> = KindOf<Config> extends 'axios'
+    ? AxiosFailure
+    : ErrOf<Res>
+
 /**
  * The api client resolves failures as an `ok: false` response rather than throwing, so a real
  * throw means something outside that contract broke (an interceptor, a serialization bug, a
@@ -115,6 +127,79 @@ const thrownAsFailure = (error: unknown) => ({
     originalError: error,
     status: 0,
 })
+
+/**
+ * Which response contract the api client follows. `result` clients resolve every request as
+ * `{ ok: true, data }` or `{ ok: false, … }` (apisauce, `@kallinen/openapi-axios-client`); `axios`
+ * clients resolve only success and throw on everything else. Declare it on your `Config` — the
+ * factory can't infer it from the adapter value, because naming `Config` explicitly stops
+ * TypeScript inferring any later type parameter.
+ */
+export type ClientKind = 'result' | 'axios'
+
+type KindOf<Config> = Config extends { client: infer K extends ClientKind }
+    ? K
+    : 'result'
+
+/**
+ * The failure an axios client produces. Axios throws on a non-2xx, so this is assembled from the
+ * `AxiosError`: `data` is the error body the server sent (where an API puts its error detail),
+ * and `status: 0` means the request never got a response at all.
+ */
+export type AxiosFailure = {
+    ok: false
+    status: number
+    problem: string
+    data: unknown
+    originalError: unknown
+}
+
+/**
+ * Normalizes one client's responses into the success/failure split the payload creators work with.
+ * `toResult` handles a resolved call, `fromError` a thrown one.
+ */
+export type ResponseAdapter = {
+    kind: ClientKind
+    toResult: (
+        raw: any
+    ) => { ok: true; data: any } | { ok: false; failure: any }
+    fromError: (error: unknown) => any
+}
+
+/** Default. The response itself says whether it succeeded. */
+export const resultAdapter: ResponseAdapter = {
+    kind: 'result',
+    toResult: (raw) =>
+        raw?.ok ? { ok: true, data: raw.data } : { ok: false, failure: raw },
+    fromError: thrownAsFailure,
+}
+
+/**
+ * Plain axios (or anything axios-shaped): a resolved promise is a success and its `data` is the
+ * body; a rejection carries the status and error body on `error.response`.
+ */
+export const axiosAdapter: ResponseAdapter = {
+    kind: 'axios',
+    toResult: (raw) => ({ ok: true, data: raw?.data }),
+    fromError: (error: any) => ({
+        ok: false as const,
+        status: error?.response?.status ?? 0,
+        problem: error?.code ?? error?.message ?? 'UNKNOWN_ERROR',
+        data: error?.response?.data,
+        originalError: error,
+    }),
+}
+
+/**
+ * An axios response run through the default adapter would look like a failure (no `ok` field), so
+ * a success would land in `reject` with no clue why. Cheap to spot, and worth saying out loud.
+ */
+const looksLikeAxios = (raw: any) =>
+    raw !== null &&
+    typeof raw === 'object' &&
+    !('ok' in raw) &&
+    'status' in raw &&
+    'data' in raw
 
 /**
  * Where a payload creator carries the `createAsyncThunk` options declared alongside its
@@ -170,12 +255,45 @@ export function createThunkFactory<
          * `NODE_ENV` to decide this for you.
          */
         onWarning?: ((message: string) => void) | false
-    } = {}
+    } & (KindOf<Config> extends 'result'
+        ? { adapter?: ResponseAdapter }
+        : {
+              /**
+               * Required because this factory's `Config` declares a non-default `client`. Pass the
+               * matching adapter — `axiosAdapter` for `client: 'axios'`.
+               */
+              adapter: ResponseAdapter
+          }) = {} as any
 ) {
     const warn =
         factoryOptions.onWarning === undefined
             ? (message: string) => console.warn(message)
             : factoryOptions.onWarning
+
+    const adapter: ResponseAdapter =
+        (factoryOptions as { adapter?: ResponseAdapter }).adapter ??
+        resultAdapter
+
+    // Turn a resolved response into the payload, or hand the failure to `reject`.
+    const settle = (
+        response: any,
+        select: ((data: any) => any) | undefined,
+        perThunkReject: ((failure: any) => any) | undefined,
+        rejectWithValue: (value: any, meta: any) => any
+    ) => {
+        if (warn && adapter.kind === 'result' && looksLikeAxios(response)) {
+            warn(
+                '[thunk-utility]: the response has no `ok` field but looks like an axios ' +
+                    "response — pass `adapter: axiosAdapter` (and `client: 'axios'` on your " +
+                    'Config) or it will be treated as a failure.'
+            )
+        }
+        const result = adapter.toResult(response)
+        if (result.ok) {
+            return select ? select(result.data) : result.data
+        }
+        return reject(result.failure, perThunkReject, rejectWithValue)
+    }
     /**
      * `createAsyncThunk` options usable next to `select`/`reject` on a payload creator, typed
      * against that thunk's own dispatch arg and the factory `Config`. `Partial` because a
@@ -220,11 +338,11 @@ export function createThunkFactory<
         )
     }
 
-    function apiThunkFor<Res extends { ok: boolean }, P extends any[]>(
+    function apiThunkFor<Res extends object, P extends any[]>(
         apiFn: (...args: P) => Promise<Res>
     ) {
-        type R = OkDataOf<Res>
-        type Err = ErrOf<Res>
+        type R = SuccessOf<Config, Res>
+        type Err = FailureOf<Config, Res>
 
         const pick = <T extends object>(obj: T, keys: readonly string[]) => {
             const out: Partial<T> = {}
@@ -337,19 +455,19 @@ export function createThunkFactory<
                     const response = await (
                         apiFn as (...args: any[]) => Promise<any>
                     )(finalParams, finalBody, { signal })
-                    if (response.ok) {
-                        const data = response.data as R
-                        return options.select
-                            ? options.select(data)
-                            : (data as unknown as T)
-                    }
-                    return reject(response, options.reject, rejectWithValue)
+                    return settle(
+                        response,
+                        options.select,
+                        options.reject,
+                        rejectWithValue
+                    )
                 } catch (error) {
                     // An abort is RTK's to report — it already races the payload creator against
-                    // the signal, and swallowing it here would mask `meta.aborted`.
+                    // the signal, and swallowing it here would mask `meta.aborted`. (An axios
+                    // CanceledError arrives here too, and the aborted signal catches it.)
                     if (signal?.aborted) throw error
                     return reject(
-                        thrownAsFailure(error),
+                        adapter.fromError(error),
                         options.reject,
                         rejectWithValue
                     )
@@ -366,11 +484,11 @@ export function createThunkFactory<
         return payloadCreator
     }
 
-    function customApiThunkFor<Res extends { ok: boolean }, P extends any[]>(
+    function customApiThunkFor<Res extends object, P extends any[]>(
         apiFn: (...args: P) => Promise<Res>
     ) {
-        type R = OkDataOf<Res>
-        type Err = ErrOf<Res>
+        type R = SuccessOf<Config, Res>
+        type Err = FailureOf<Config, Res>
 
         // Mirrors apiThunkFor: `select` projects the success body (its return becomes the payload
         // type), `reject` maps the full error response into the reject value, and any remaining
@@ -442,17 +560,16 @@ export function createThunkFactory<
                         signal,
                         ...map.config?.(arg, state),
                     })
-                    if (response.ok) {
-                        const data = response.data as R
-                        return map.select
-                            ? map.select(data)
-                            : (data as unknown as T)
-                    }
-                    return reject(response, map.reject, rejectWithValue)
+                    return settle(
+                        response,
+                        map.select,
+                        map.reject,
+                        rejectWithValue
+                    )
                 } catch (error) {
                     if (signal?.aborted) throw error
                     return reject(
-                        thrownAsFailure(error),
+                        adapter.fromError(error),
                         map.reject,
                         rejectWithValue
                     )
