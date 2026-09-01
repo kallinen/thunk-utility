@@ -24,46 +24,68 @@ const makeStore = (thunks: Record<string, any>, initial: TestState) => {
     return configureStore({ reducer: slice.reducer })
 }
 
-describe('createThunks — per-thunk createAsyncThunk options', () => {
-    it('applies a per-thunk condition that blocks dispatch', async () => {
+describe('thunk options — declared next to select/reject', () => {
+    it('applies a condition that blocks dispatch', async () => {
         const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
         const factory = createThunkFactory<{ state: TestState }>({})
 
-        const thunks = factory.createThunks(
-            { getValue: factory.apiThunkFor(apiFn)() },
-            'test',
-            {
-                getValue: {
-                    condition: (_arg, { getState }) => !getState().fetching,
-                },
-            }
-        )
+        const thunks = factory.createThunks({
+            getValue: factory.apiThunkFor(apiFn)({
+                condition: (_arg, { getState }) => !getState().fetching,
+            }),
+        })
 
         const store = makeStore(thunks, { fetching: true, value: null })
-        const result = await store.dispatch(thunks.getValue(undefined as any) as any)
+        const result = await store.dispatch(
+            thunks.getValue(undefined as any) as any
+        )
 
         expect(apiFn).not.toHaveBeenCalled()
         expect((result as any).meta.condition).toBe(true)
     })
 
-    it('runs the thunk when the condition passes', async () => {
+    it('runs the thunk when the condition passes, keeping select', async () => {
+        const apiFn = jest.fn() as jest.Mock<
+            Promise<ApiResponse<{ name: string }>>
+        >
+        apiFn.mockResolvedValue({ ok: true, data: { name: 'Ada' } })
+        const factory = createThunkFactory<{ state: TestState }>({})
+
+        const thunks = factory.createThunks({
+            getValue: factory.apiThunkFor(apiFn)({
+                select: (data) => data.name,
+                condition: (_arg, { getState }) => !getState().fetching,
+            }),
+        })
+
+        const store = makeStore(thunks, { fetching: false, value: null })
+        const result = await store.dispatch(
+            thunks.getValue(undefined as any) as any
+        )
+
+        expect(apiFn).toHaveBeenCalledTimes(1)
+        expect((result as any).payload).toBe('Ada')
+    })
+
+    it('honours a custom idGenerator', async () => {
         const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
         const factory = createThunkFactory<{ state: TestState }>({})
 
         const thunks = factory.createThunks(
-            { getValue: factory.apiThunkFor(apiFn)() },
-            'test',
             {
-                getValue: {
-                    condition: (_arg, { getState }) => !getState().fetching,
-                },
-            }
+                getValue: factory.apiThunkFor(apiFn)({
+                    idGenerator: () => 'fixed-id',
+                }),
+            },
+            'test'
         )
 
         const store = makeStore(thunks, { fetching: false, value: null })
-        await store.dispatch(thunks.getValue(undefined as any) as any)
+        const result = await store.dispatch(
+            thunks.getValue(undefined as any) as any
+        )
 
-        expect(apiFn).toHaveBeenCalledTimes(1)
+        expect((result as any).meta.requestId).toBe('fixed-id')
     })
 
     it('applies a factory-wide default to every thunk', async () => {
@@ -95,14 +117,10 @@ describe('createThunks — per-thunk createAsyncThunk options', () => {
             { thunkOptions: { condition: () => false } }
         )
 
-        const thunks = factory.createThunks(
-            {
-                getA: factory.apiThunkFor(a)(),
-                getB: factory.apiThunkFor(b)(),
-            },
-            undefined,
-            { getB: { condition: () => true } }
-        )
+        const thunks = factory.createThunks({
+            getA: factory.apiThunkFor(a)(),
+            getB: factory.apiThunkFor(b)({ condition: () => true }),
+        })
 
         const store = makeStore(thunks, { fetching: false, value: null })
         await store.dispatch(thunks.getA(undefined as any) as any)
@@ -112,20 +130,41 @@ describe('createThunks — per-thunk createAsyncThunk options', () => {
         expect(b).toHaveBeenCalledTimes(1)
     })
 
-    it('honours a custom idGenerator', async () => {
+    it('merges factory and per-thunk options key by key', async () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+        const factory = createThunkFactory<{ state: TestState }>(
+            {},
+            { thunkOptions: { idGenerator: () => 'from-factory' } }
+        )
+
+        const thunks = factory.createThunks({
+            getValue: factory.apiThunkFor(apiFn)({ condition: () => true }),
+        })
+
+        const store = makeStore(thunks, { fetching: false, value: null })
+        const result = await store.dispatch(
+            thunks.getValue(undefined as any) as any
+        )
+
+        expect((result as any).meta.requestId).toBe('from-factory')
+        expect(apiFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('works on customApiThunkFor too', async () => {
         const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
         const factory = createThunkFactory<{ state: TestState }>({})
 
-        const thunks = factory.createThunks(
-            { getValue: factory.apiThunkFor(apiFn)() },
-            'test',
-            { getValue: { idGenerator: () => 'fixed-id' } }
-        )
+        const thunks = factory.createThunks({
+            getValue: factory.customApiThunkFor(apiFn)({
+                params: (arg: { id: number }) => ({ id: arg.id }),
+                condition: (_arg, { getState }) => !getState().fetching,
+            }),
+        })
 
-        const store = makeStore(thunks, { fetching: false, value: null })
-        const result = await store.dispatch(thunks.getValue(undefined as any) as any)
+        const store = makeStore(thunks, { fetching: true, value: null })
+        await store.dispatch(thunks.getValue({ id: 1 }) as any)
 
-        expect((result as any).meta.requestId).toBe('fixed-id')
+        expect(apiFn).not.toHaveBeenCalled()
     })
 
     it('still works when no options are given at all', async () => {
@@ -139,6 +178,15 @@ describe('createThunks — per-thunk createAsyncThunk options', () => {
         await store.dispatch(thunks.getValue(undefined as any) as any)
 
         expect(apiFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not leak the options key into the payload creator as an own enumerable prop', () => {
+        const apiFn = jest.fn().mockResolvedValue({ ok: true, data: 'ok' })
+        const factory = createThunkFactory<{ state: TestState }>({})
+        const creator = factory.apiThunkFor(apiFn)({ condition: () => true })
+
+        expect(Object.keys(creator)).toEqual([])
+        expect(typeof creator).toBe('function')
     })
 })
 
@@ -156,34 +204,41 @@ const typedFactory = createThunkFactory<{
 }>()
 
 function _typeChecks() {
-    typedFactory.createThunks(
-        { getOne: typedFactory.apiThunkFor(api)() },
-        'ns',
-        {
-            getOne: {
-                // `arg` is the thunk's own arg type, `getState()` the factory Config state
-                condition: (arg, { getState }) => {
-                    const _id: { id: number } | number | undefined = arg
-                    void _id
-                    return !getState().fetching
-                },
-            },
-        }
-    )
-
-    typedFactory.createThunks({ getOne: typedFactory.apiThunkFor(api)() }, 'ns', {
-        // @ts-expect-error — not a thunk in the map
-        nope: { condition: () => true },
+    // `arg` is the thunk's own arg type, `getState()` the factory Config state, and `select`
+    // still types `data` and the resulting payload.
+    const creator = typedFactory.apiThunkFor(api)({
+        select: (data) => data.length,
+        condition: (arg, { getState }) => {
+            const _id: { id: number } | number | undefined = arg
+            void _id
+            return !getState().fetching
+        },
     })
+    const thunks = typedFactory.createThunks({ getOne: creator }, 'ns')
+    const _payload: number = thunks.getOne.fulfilled({} as any, '', 0).payload
+    void _payload
 
-    typedFactory.createThunks({ getOne: typedFactory.apiThunkFor(api)() }, 'ns', {
+    typedFactory.apiThunkFor(api)({
         // @ts-expect-error — not a valid createAsyncThunk option
-        getOne: { notAnOption: true },
+        notAnOption: true,
     })
+
+    // @ts-expect-error — not a valid createAsyncThunk option
+    typedFactory.customApiThunkFor(api)({
+        params: (arg: { id: number }) => arg,
+        notAnOption: true,
+    })
+
+    typedFactory.createThunks(
+        { getOne: creator },
+        'ns',
+        // @ts-expect-error — createThunks no longer takes a per-thunk options map
+        { getOne: { condition: () => true } }
+    )
 }
 void _typeChecks
 
-describe('createThunks options (types)', () => {
+describe('thunk options (types)', () => {
     it('type-level assertions compile', () => {
         expect(true).toBe(true)
     })

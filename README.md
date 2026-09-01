@@ -204,32 +204,47 @@ you can add headers without losing cancellation (or override `signal` explicitly
 
 ## Thunk options — `condition`, `idGenerator`, …
 
-`createThunks` takes a third argument: `createAsyncThunk` options per thunk, typed against that
-thunk's own arg and your `Config`. The usual case is skipping a dispatch that's already in flight:
+`createAsyncThunk`'s options go next to `select` and `reject`, on the thunk they belong to. They're
+typed against that thunk's own arg and your `Config`. The usual case is skipping a dispatch that's
+already in flight:
 
 ```ts
 export const thunks = createThunks(
     {
-        getUsers: apiThunkFor(api.listUsers)(),
+        getUsers: apiThunkFor(api.listUsers)({
+            condition: (_arg, { getState }) => !getState().users.fetching,
+        }),
         getUser: apiThunkFor(api.getUser)(),
     },
-    'users',
-    {
-        getUsers: {
-            condition: (_arg, { getState }) => !getState().users.fetching,
-        },
-    }
+    'users'
 )
 ```
 
-For something that should apply everywhere, set `thunkOptions` on the factory. The two merge
-shallowly and the per-thunk entry wins key by key:
+They combine freely with `select` and `reject` — one object, one thunk:
+
+```ts
+getUsers: apiThunkFor(api.listUsers)({
+    select: (data) => data.users,
+    condition: (_arg, { getState }) => !getState().users.fetching,
+})
+```
+
+The same keys work on `customApiThunkFor`, alongside its `params`/`body`/`config` mappers.
+
+For something that should apply everywhere, set `thunkOptions` on the factory:
 
 ```ts
 const { createThunks, apiThunkFor } = createThunkFactory<ThunkState>(apiMetadata, {
     thunkOptions: { condition: (_arg, { getState }) => !getState().app.offline },
 })
 ```
+
+The two merge shallowly, and what's on the thunk wins key by key.
+
+> **0.9.0** — `createThunks` used to take a third argument, the same options keyed by thunk name.
+> It's gone: it did nothing the form above doesn't. Move each entry into its thunk's own options
+> object. A hand-written payload creator that needs `condition` now goes through RTK's
+> `createAsyncThunk` directly.
 
 ## Warnings
 
