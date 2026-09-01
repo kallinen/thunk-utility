@@ -1,8 +1,9 @@
 import { configureStore, createSlice } from '@reduxjs/toolkit'
 import {
     axiosAdapter,
+    type DefaultClient,
     createThunkFactory,
-    resultAdapter,
+    defaultAdapter,
     sliceHelper,
 } from '../src'
 
@@ -218,12 +219,16 @@ function _typeChecks() {
         { adapter: axiosAdapter }
     )
 
-    // The default kind still resolves to the `{ ok, data }` contract.
+    // The default kind still resolves to the `{ ok, data }` contract, spelled either way.
     const rf = createThunkFactory<{ state: { a: State } }>(
         {},
-        { adapter: resultAdapter }
+        { adapter: defaultAdapter }
     )
-    void rf
+    const rf2 = createThunkFactory<{
+        state: { a: State }
+        client: DefaultClient
+    }>({})
+    void [rf, rf2]
 }
 void _typeChecks
 

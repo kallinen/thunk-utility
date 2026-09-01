@@ -469,17 +469,25 @@ else. Tell the factory which contract your client follows and it adapts: declare
 `Config` and pass the matching adapter.
 
 ```ts
-import { createThunkFactory, axiosAdapter } from '@kallinen/thunk-utility'
+import {
+    createThunkFactory,
+    axiosAdapter,
+    type AxiosClient,
+} from '@kallinen/thunk-utility'
 
 type ThunkState = {
     state: RootState
     rejectValue: AppError
-    client: 'axios'
+    client: AxiosClient
 }
 
 const { createThunks, customApiThunkFor } =
     createThunkFactory<ThunkState>(apiMetadata, { adapter: axiosAdapter })
 ```
+
+`client` names the response contract: `AxiosClient` for a client that throws on failure,
+`DefaultClient` (the assumed one, so you can leave it out) for a client that resolves every request
+as `{ ok, data }`. Both are exported, and their union is `ClientKind`.
 
 Every call site then reads exactly as before — the difference is entirely in what the types resolve
 to and how a failure is unpacked:
@@ -503,7 +511,8 @@ getUser: customApiThunkFor(api.getUser)({
 
 Two things worth knowing. The `client` field lives on the `Config` **type** rather than being
 inferred from the adapter value, because naming `Config` explicitly stops TypeScript from inferring
-any later type parameter — it would silently keep the default types. And since plain axios functions
+any later type parameter — it would silently keep the default types. (Misspell it and the factory
+call itself is the error, not some later `select`.) And since plain axios functions
 carry no metadata, this pairs with `customApiThunkFor`, where you map the arguments anyway; if you
 forget the adapter entirely, the first response triggers a warning rather than being misread as a
 failure.
@@ -545,7 +554,8 @@ thunk's `AbortSignal` — all inferred, no metadata involved.
 
 For a client that is neither shape, write a `ResponseAdapter` of your own — `toResult` splits a
 resolved response into success or failure, `fromError` turns a thrown one into a failure — and pass
-it the same way `axiosAdapter` is passed above.
+it the same way `axiosAdapter` is passed above. `defaultAdapter` is the one used when you pass
+none.
 
 What `@kallinen/openapi-axios-client` adds is the **automatic argument splitting** in `apiThunkFor`:
 its generated functions carry a `__meta.key` that the `apiMetadata` map resolves into params/query/body

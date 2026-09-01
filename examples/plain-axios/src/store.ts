@@ -3,6 +3,7 @@ import {
     axiosAdapter,
     createThunkFactory,
     sliceHelper,
+    type AxiosClient,
 } from '@kallinen/thunk-utility'
 import { createApi, type User } from './api.js'
 
@@ -25,12 +26,12 @@ export type RootState = { users: UsersState }
 export const buildStore = (baseUrl: string) => {
     const api = createApi(baseUrl)
 
-    // `client: 'axios'` on the Config is what switches the types over; `adapter: axiosAdapter` is
-    // the runtime half. Declared once, here — no call site mentions axios again.
+    // `client: AxiosClient` on the Config is what switches the types over; `adapter: axiosAdapter`
+    // is the runtime half. Declared once, here — no call site mentions axios again.
     const { createThunks, customApiThunkFor } = createThunkFactory<{
         state: RootState
         rejectValue: string
-        client: 'axios'
+        client: AxiosClient
     }>(
         {},
         {

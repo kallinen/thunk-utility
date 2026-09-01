@@ -13,7 +13,7 @@ npm start
 
 - **`src/api.ts`** — an ordinary axios client. Note the third parameter on every method: that is
   where thunk-utility passes the thunk's `AbortSignal`, and axios understands it natively.
-- **`src/store.ts`** — `client: 'axios'` on the `Config` switches the types over, `adapter:
+- **`src/store.ts`** — `client: AxiosClient` on the `Config` switches the types over, `adapter:
   axiosAdapter` is the runtime half. Both are declared once; no call site mentions axios again.
 - **`params` / `body` mappers** — axios functions carry no metadata, so the mapping is explicit. In
   exchange the dispatch argument is whatever you want: `getUser` takes a bare `number` here.

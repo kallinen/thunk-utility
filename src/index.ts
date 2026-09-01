@@ -142,17 +142,25 @@ const thrownAsFailure = (error: unknown) => ({
 })
 
 /**
- * Which response contract the api client follows. `result` clients resolve every request as
- * `{ ok: true, data }` or `{ ok: false, … }` (apisauce, `@kallinen/openapi-axios-client`); `axios`
- * clients resolve only success and throw on everything else. Declare it on your `Config` — the
+ * The contract this library assumes unless told otherwise: every request resolves, and the
+ * response says whether it succeeded — `{ ok: true, data }` or `{ ok: false, … }`. Both apisauce
+ * and `@kallinen/openapi-axios-client` work this way.
+ */
+export type DefaultClient = 'default'
+
+/** Plain axios: resolves only on success, and throws an `AxiosError` on everything else. */
+export type AxiosClient = 'axios'
+
+/**
+ * Which response contract the api client follows. Declare it as `client` on your `Config` — the
  * factory can't infer it from the adapter value, because naming `Config` explicitly stops
  * TypeScript inferring any later type parameter.
  */
-export type ClientKind = 'result' | 'axios'
+export type ClientKind = DefaultClient | AxiosClient
 
 type KindOf<Config> = Config extends { client: infer K extends ClientKind }
     ? K
-    : 'result'
+    : DefaultClient
 
 /**
  * The failure an axios client produces. Axios throws on a non-2xx, so this is assembled from the
@@ -179,9 +187,9 @@ export type ResponseAdapter = {
     fromError: (error: unknown) => any
 }
 
-/** Default. The response itself says whether it succeeded. */
-export const resultAdapter: ResponseAdapter = {
-    kind: 'result',
+/** Used unless a factory says otherwise. The response itself says whether it succeeded. */
+export const defaultAdapter: ResponseAdapter = {
+    kind: 'default',
     toResult: (raw) =>
         raw?.ok ? { ok: true, data: raw.data } : { ok: false, failure: raw },
     fromError: thrownAsFailure,
@@ -242,8 +250,8 @@ const attachThunkOptions = <F extends object>(
 }
 
 export function createThunkFactory<
-    // `client` is optional and defaults to 'result'; naming it in the constraint means a typo
-    // ('axois') is an error here rather than a puzzling `unknown` at some later `select`.
+    // `client` is optional and defaults to `DefaultClient`; naming it in the constraint means a
+    // typo ('axois') is an error here rather than a puzzling `unknown` at some later `select`.
     Config extends AsyncThunkConfig & { client?: ClientKind },
     Failure = any
 >(
@@ -270,7 +278,7 @@ export function createThunkFactory<
          * `NODE_ENV` to decide this for you.
          */
         onWarning?: ((message: string) => void) | false
-    } & (KindOf<Config> extends 'result'
+    } & (KindOf<Config> extends DefaultClient
         ? { adapter?: ResponseAdapter }
         : {
               /**
@@ -287,7 +295,7 @@ export function createThunkFactory<
 
     const adapter: ResponseAdapter =
         (factoryOptions as { adapter?: ResponseAdapter }).adapter ??
-        resultAdapter
+        defaultAdapter
 
     // Turn a resolved response into the payload, or hand the failure to `reject`.
     const settle = (
@@ -296,7 +304,7 @@ export function createThunkFactory<
         perThunkReject: ((failure: any) => any) | undefined,
         rejectWithValue: (value: any, meta: any) => any
     ) => {
-        if (warn && adapter.kind === 'result' && looksLikeAxios(response)) {
+        if (warn && adapter.kind === 'default' && looksLikeAxios(response)) {
             warn(
                 '[thunk-utility]: the response has no `ok` field but looks like an axios ' +
                     "response — pass `adapter: axiosAdapter` (and `client: 'axios'` on your " +
