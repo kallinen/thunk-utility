@@ -160,6 +160,17 @@ Convert one slice, ship it, convert the next — or leave a slice alone forever 
 above or below them. (Redux Toolkit itself refuses `addCase` after `addMatcher`; `sliceHelper`
 registers around that so the rule never reaches you.)
 
+## Examples
+
+Two runnable apps in [`examples/`](./examples) — the same app against the same backend, one using
+`@kallinen/openapi-axios-client` and one using [plain axios](./examples/plain-axios). Both start a
+real server, dispatch the same thunks and print the state after each, so the difference between the
+two client styles is a diff rather than a paragraph.
+
+```bash
+npm run build && cd examples/plain-axios && npm install && npm start
+```
+
 ## Install
 
 ```bash

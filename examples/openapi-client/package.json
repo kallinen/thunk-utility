@@ -1,0 +1,23 @@
+{
+    "name": "thunk-utility-example-openapi-client",
+    "private": true,
+    "version": "0.0.0",
+    "description": "thunk-utility with @kallinen/openapi-axios-client: thunks generated from an OpenAPI spec",
+    "type": "module",
+    "scripts": {
+        "generate": "openapi-typings-gen -i openapi.json -o src/generated/api-types.ts",
+        "start": "tsx src/main.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@kallinen/openapi-axios-client": "^0.5.4",
+        "@kallinen/thunk-utility": "file:../..",
+        "@reduxjs/toolkit": "^2.11.2"
+    },
+    "devDependencies": {
+        "@kallinen/openapi-typings-gen": "^0.4.2",
+        "@types/node": "^22.10.2",
+        "tsx": "^4.19.2",
+        "typescript": "^5.9.3"
+    }
+}

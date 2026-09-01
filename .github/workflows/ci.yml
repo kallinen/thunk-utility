@@ -40,6 +40,16 @@ jobs:
             - name: Build
               run: npm run build
 
+            # The examples link the package with `file:../..`, so they only build against a
+            # fresh `lib/` — which the Build step above just produced. They run on one Node
+            # version only; this is checking the public API still fits, not the runtime.
+            - name: Examples
+              if: matrix.node-version == '22.x'
+              run: |
+                  for example in examples/*/; do
+                      (cd "$example" && npm install --no-audit --no-fund && npm run typecheck && npm start)
+                  done
+
             # The published entry points must resolve for both CJS and ESM consumers.
             - name: Check package exports
               run: |

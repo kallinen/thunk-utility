@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "noEmit": true,
+        "lib": [
+            "ES2022",
+            "DOM"
+        ],
+        "baseUrl": ".",
+        "paths": {
+            "@reduxjs/toolkit": [
+                "./node_modules/@reduxjs/toolkit"
+            ],
+            "@reduxjs/toolkit/*": [
+                "./node_modules/@reduxjs/toolkit/*"
+            ]
+        },
+        "types": [
+            "node"
+        ]
+    },
+    "include": [
+        "src"
+    ]
+}

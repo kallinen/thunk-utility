@@ -1,0 +1,145 @@
+{
+    "openapi": "3.0.0",
+    "info": { "title": "Example users API", "version": "1.0.0" },
+    "paths": {
+        "/users": {
+            "get": {
+                "operationId": "listUsers",
+                "parameters": [
+                    {
+                        "name": "team",
+                        "in": "query",
+                        "required": false,
+                        "schema": { "type": "string" }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserList"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{id}": {
+            "get": {
+                "operationId": "getUser",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer" }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/users": {
+            "post": {
+                "operationId": "createUser",
+                "parameters": [
+                    {
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "integer" }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/NewUser"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserEnvelope"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "User": {
+                "type": "object",
+                "required": ["id", "name", "email"],
+                "properties": {
+                    "id": { "type": "integer" },
+                    "name": { "type": "string" },
+                    "email": { "type": "string" }
+                }
+            },
+            "UserList": {
+                "type": "object",
+                "required": ["users", "total"],
+                "properties": {
+                    "users": {
+                        "type": "array",
+                        "items": { "$ref": "#/components/schemas/User" }
+                    },
+                    "total": { "type": "integer" }
+                }
+            },
+            "UserEnvelope": {
+                "type": "object",
+                "required": ["user"],
+                "properties": {
+                    "user": { "$ref": "#/components/schemas/User" }
+                }
+            },
+            "NewUser": {
+                "type": "object",
+                "required": ["name", "email"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "email": { "type": "string" }
+                }
+            },
+            "ApiError": {
+                "type": "object",
+                "required": ["detail"],
+                "properties": { "detail": { "type": "string" } }
+            }
+        }
+    }
+}
