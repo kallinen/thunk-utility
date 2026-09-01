@@ -1,7 +1,45 @@
+[![npm module](https://badge.fury.io/js/@kallinen%2Fthunk-utility.svg)](https://www.npmjs.org/package/@kallinen/thunk-utility)
+[![CI](https://github.com/kallinen/thunk-utility/actions/workflows/ci.yml/badge.svg)](https://github.com/kallinen/thunk-utility/actions/workflows/ci.yml)
+
 # @kallinen/thunk-utility
 
-Typed Redux Toolkit thunks. Built to pair with **@kallinen/openapi-axios-client** — it reads that
-client's metadata to split dispatch arguments into params and body.
+Typed Redux Toolkit thunks, without the boilerplate. Same thunk, same store, same slices — one line
+instead of twenty, and every type still inferred.
+
+**Before** — a hand-written `createAsyncThunk`: three type parameters, a failure branch, a try/catch,
+and an abort re-throw, repeated for every endpoint.
+
+```ts
+export const getUser = createAsyncThunk<
+    User,
+    { id: number },
+    { state: RootState; rejectValue: string }
+>('users/getUser', async ({ id }, { rejectWithValue, signal }) => {
+    try {
+        const res = await api.getUser({ id }, undefined, { signal })
+        if (!res.ok) return rejectWithValue(res.problem)
+        return res.data.user
+    } catch (e) {
+        if (signal.aborted) throw e
+        return rejectWithValue('UNKNOWN_ERROR')
+    }
+})
+```
+
+**After** — the same thunk. The argument type, the payload type and the reject value are inferred
+from the api function; cancellation and thrown errors are handled for you.
+
+```ts
+export const thunks = createThunks(
+    { getUser: apiThunkFor(api.getUser)({ select: (data) => data.user }) },
+    'users'
+)
+
+dispatch(thunks.getUser(5))
+```
+
+Pairs with **@kallinen/openapi-axios-client**, and works with any api function that resolves to
+`{ ok, data }` — see [Using it without the OpenAPI client](#using-it-without-the-openapi-client).
 
 ## Why
 
@@ -44,11 +82,92 @@ thunks change. If your thunks change, TypeScript tells you exactly where your UI
 
 The result is less boilerplate and fewer opportunities for bugs.
 
+## How it compares
+
+**vs. RTK Query.** RTK Query owns the data: its own cache, its own slice, a tag-based invalidation
+model, usually read through generated hooks. This library owns nothing — it produces ordinary
+`createAsyncThunk` thunks whose results land in **your** slices, through your reducers.
+
+The difference that matters day to day is where the types come from, and where they stop.
+
+In RTK Query's default setup you declare them: `build.query<Post, number>` names the result type and
+the argument type per endpoint, `Post` is an interface you maintain, and `transformResponse` needs
+the raw response shape annotated by hand before you can project it. Here all three are read off the
+api function — the dispatch argument, the `data` handed to `select`, and the resulting payload — so
+there's nothing to restate and nothing to drift.
+
+And the chain doesn't stop at the boundary. RTK Query types the hand-off: the hook gives you typed
+data, and past that you're in your own code. Here `select` types the payload, `reject` types the
+rejected payload, and `mapThunksToState` checks that payload against the **state field** you land it
+in. Point a thunk at a field whose type no longer fits and it's a compile error in your slice, not
+`undefined` in a component — the spec-to-UI chain above holds through your reducers too. That's the
+whole job of writing a thunk, typed end to end, with nothing left for you to declare by hand.
+
+So: reach for RTK Query when you want caching, deduplication and refetching handed to you — that's
+its job and it does it well, and this library doesn't try to. Reach for this when the server data
+belongs in your state tree next to local state, when you already have slices and selectors you'd
+rather not migrate, or when you want your existing api client to stay the thing that talks to the
+network.
+
+**vs. hand-written `createAsyncThunk`.** That's the [before/after](#kallinenthunk-utility) at the top
+of this page. Identical output, minus the type parameters and the failure plumbing you'd otherwise
+repeat per endpoint. Nothing is hidden: the thunks are RTK thunks, `dispatch(...)` returns the usual
+promise, `.abort()` works, and you can drop back to a plain async function in the same
+`createThunks` map whenever an endpoint doesn't fit.
+
+**vs. generating RTK Query endpoints from OpenAPI.** `@rtk-query/codegen-openapi` closes the
+hand-authored-types gap above — its endpoints come from the spec, same as this does. What's left is
+the architectural trade: codegen for RTK Query gives you hooks and a cache; this gives you thunks and
+leaves the state to you. Both start from the same spec, so the choice is about where the data should
+live, not about how much typing you'll do.
+
+**Size:** ~2 KB gzipped, no runtime dependencies (`@reduxjs/toolkit` is a peer dependency), and
+`sideEffects: false` for tree-shaking.
+
+## Adding it to an existing codebase
+
+Nothing here replaces Redux Toolkit — it *is* Redux Toolkit. `createThunks` calls
+`createAsyncThunk`, so the actions are the usual `users/getUsers/pending` triples, DevTools shows
+what it always showed, your middleware, persistence and selectors are untouched, and
+`dispatch(thunk())` returns the same promise with the same `.unwrap()` and `.abort()`. There is no
+provider to add, no store enhancer, no new mental model — a factory call and a map of thunks.
+
+That means adoption is incremental. A slice can hold converted thunks and hand-written ones at the
+same time, and `sliceHelper` takes the `builder` you already have, so existing `addCase` calls stay
+where they are:
+
+```ts
+const slice = createSlice({
+    name: 'users',
+    initialState,
+    reducers: {},
+    extraReducers: (builder) => {
+        // still here, untouched
+        builder.addCase(myOldThunk.fulfilled, (s, a) => { s.legacy = a.payload })
+
+        // converted one endpoint at a time
+        const helper = sliceHelper(builder, thunks)
+        helper.mapThunksToState('fulfilled', { getUser: 'user' })
+        helper.forEach('pending', (s) => { s.fetching = true })
+        helper.forEach('fulfilled', (s) => { s.fetching = false })
+    },
+})
+```
+
+Convert one slice, ship it, convert the next — or leave a slice alone forever if it's happy.
+
+`mapThunksToState` and `forEach` can be called in either order, and your own `addCase` calls can sit
+above or below them. (Redux Toolkit itself refuses `addCase` after `addMatcher`; `sliceHelper`
+registers around that so the rule never reaches you.)
+
 ## Install
 
 ```bash
 npm install @kallinen/thunk-utility
 ```
+
+Redux Toolkit 2.x is a peer dependency — `npm install @reduxjs/toolkit` if you don't have it. Node
+18 or newer.
 
 ## Quick start
 
@@ -314,6 +433,9 @@ helper.forEach('fulfilled', (s) => { s.fetching = false })
 helper.forEach('rejected', (s) => { s.fetching = false })
 ```
 
+Both methods may be called in any order, as many times as you like, and alongside your own
+`builder.addCase` / `builder.addMatcher` calls.
+
 ## Plain thunks
 
 Anything that isn't a metadata-driven api call is just an async function in `createThunks` — the
@@ -328,11 +450,51 @@ export const thunks = createThunks({
 }, 'users')
 ```
 
+## Using it without the OpenAPI client
+
+The only hard requirement is the **response shape**: an api function that resolves to
+`{ ok: true, data }` on success and `{ ok: false, ... }` on failure — the contract
+[apisauce](https://github.com/infinitered/apisauce) and `@kallinen/openapi-axios-client` both use.
+Anything that resolves to that works, including a function you write by hand:
+
+```ts
+const getUser = async (
+    params: { id: number },
+    _body?: undefined,
+    config?: { signal?: AbortSignal }
+) => {
+    const res = await fetch(`/users/${params.id}`, config)
+    return res.ok
+        ? { ok: true as const, data: (await res.json()) as User }
+        : { ok: false as const, problem: res.statusText, status: res.status }
+}
+
+export const thunks = createThunks(
+    {
+        getUser: customApiThunkFor(getUser)({
+            params: (arg: { id: number }) => arg,
+            select: (data) => data.name,
+            reject: (failure) => `HTTP ${failure.status}`,
+        }),
+    },
+    'users'
+)
+```
+
+`select` gets `User`, `reject` gets the `ok: false` branch, and the third parameter receives the
+thunk's `AbortSignal` — all inferred, no metadata involved.
+
+What `@kallinen/openapi-axios-client` adds is the **automatic argument splitting** in `apiThunkFor`:
+its generated functions carry a `__meta.key` that the `apiMetadata` map resolves into params/query/body
+key lists, which is how one flat dispatch object gets routed to the right place. Without that
+metadata, use `customApiThunkFor` and map the arguments yourself, as above.
+
 ## Setup notes
 
-- `apiThunkFor` needs functions generated by `@kallinen/openapi-axios-client` (they carry
-  `__meta.key`) plus the matching `apiMetadata` passed to `createThunkFactory`. Without metadata,
-  arguments are dropped and a warning is emitted (see [Warnings](#warnings)).
+- `apiThunkFor`'s argument splitting needs functions generated by `@kallinen/openapi-axios-client`
+  (they carry `__meta.key`) plus the matching `apiMetadata` passed to `createThunkFactory`. Without
+  metadata, arguments are dropped and a warning is emitted (see [Warnings](#warnings)); use
+  `customApiThunkFor` instead (see [above](#using-it-without-the-openapi-client)).
 - The factory's `Config` is your `{ state; dispatch; rejectValue? }` — the same `ThunkApiConfig`
   Redux Toolkit uses. A per-thunk `reject` overrides `rejectValue` for that thunk.
 - Create the factory **once** in a shared module and import `{ createThunks, apiThunkFor, … }`
