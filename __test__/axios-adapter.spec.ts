@@ -211,6 +211,13 @@ function _typeChecks() {
     // has a default), so the mismatch surfaces at runtime as the axios-shape warning instead.
     createThunkFactory<{ state: { a: State }; client: 'axios' }>({})
 
+    // A misspelled kind is caught right here, not as an `unknown` at a later `select`.
+    // @ts-expect-error — 'axois' is not a ClientKind
+    createThunkFactory<{ state: { a: State }; client: 'axois' }>(
+        {},
+        { adapter: axiosAdapter }
+    )
+
     // The default kind still resolves to the `{ ok, data }` contract.
     const rf = createThunkFactory<{ state: { a: State } }>(
         {},

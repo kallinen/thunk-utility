@@ -242,7 +242,9 @@ const attachThunkOptions = <F extends object>(
 }
 
 export function createThunkFactory<
-    Config extends AsyncThunkConfig,
+    // `client` is optional and defaults to 'result'; naming it in the constraint means a typo
+    // ('axois') is an error here rather than a puzzling `unknown` at some later `select`.
+    Config extends AsyncThunkConfig & { client?: ClientKind },
     Failure = any
 >(
     apiMetadata: ApiMetaShape = {},
