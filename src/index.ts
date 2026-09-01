@@ -520,11 +520,30 @@ export function sliceHelper<S, M extends ActionMap, DefaultCfg>(
     builder: ActionReducerMapBuilder<S>,
     thunks: ThunksOf<M, DefaultCfg>
 ) {
+    // RTK rejects `addCase` after `addMatcher`, which would otherwise make the call order of
+    // `mapThunksToState` and `forEach` significant — and it reports that at store creation, far
+    // from the slice that caused it. So once a matcher is on the builder we register the
+    // remaining single-action reducers as matchers too: a matcher over one action creator fires
+    // exactly where its case would have, leaving the two methods usable in either order.
+    let matcherRegistered = false
+
+    const addFor = (
+        actionCreator: any,
+        reducer: (state: Draft<S>, action: PayloadAction<any>) => void
+    ) => {
+        if (matcherRegistered) {
+            builder.addMatcher(isAnyOf(actionCreator), reducer as any)
+        } else {
+            builder.addCase(actionCreator, reducer as any)
+        }
+    }
+
     const forEach = (state: AsyncState, reducer: CaseReducer<S>) => {
         const thunkMatchers = Object.entries(thunks).map(
             ([_, thunk]) => thunk[state]
         )
         builder.addMatcher(isAnyOf(...thunkMatchers), reducer)
+        matcherRegistered = true
     }
 
     // Land each listed thunk's payload in a state field. `fulfilled` maps the success payload
@@ -545,7 +564,7 @@ export function sliceHelper<S, M extends ActionMap, DefaultCfg>(
     ): void {
         Object.entries(map).forEach(([thunkName, stateKey]) => {
             const thunk = thunks[thunkName]
-            builder.addCase(
+            addFor(
                 thunk[state],
                 (stateObj: Draft<S>, action: PayloadAction<any>) => {
                     stateObj[stateKey as keyof Draft<S>] = action.payload
