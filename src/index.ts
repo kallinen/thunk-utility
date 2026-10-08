@@ -35,6 +35,95 @@ type ThunksOf<M extends ActionMap, DefaultCfg> = {
     >
 }
 
+type FulfilledThunkAction = {
+    payload: unknown
+    meta: { requestStatus: 'fulfilled' }
+}
+
+type RejectedThunkAction = {
+    payload?: unknown
+    error?: unknown
+    meta: {
+        requestStatus: 'rejected'
+        rejectedWithValue?: boolean
+    }
+}
+
+type SettledThunkAction = FulfilledThunkAction | RejectedThunkAction
+
+type FulfilledActionOf<Action> = Extract<
+    Action,
+    { meta: { requestStatus: 'fulfilled' } }
+>
+
+type RejectedActionOf<Action> = Extract<
+    Action,
+    { meta: { requestStatus: 'rejected' } }
+>
+
+type ActionPayload<Action> = Action extends { payload: infer Payload }
+    ? Payload
+    : undefined
+
+type ActionError<Action> = Action extends { error: infer Error }
+    ? Error
+    : undefined
+
+/**
+ * A settled async thunk represented as a value instead of RTK's fulfilled/rejected action union.
+ * `action` keeps the original action and its metadata available for advanced cases.
+ */
+export type ThunkResult<
+    Value,
+    Failure,
+    Action extends SettledThunkAction = SettledThunkAction
+> =
+    | {
+          ok: true
+          value: Value
+          action: FulfilledActionOf<Action>
+      }
+    | {
+          ok: false
+          error: Failure
+          action: RejectedActionOf<Action>
+      }
+
+type ThunkResultFor<Action extends SettledThunkAction> = ThunkResult<
+    ActionPayload<FulfilledActionOf<Action>>,
+    | ActionPayload<RejectedActionOf<Action>>
+    | ActionError<RejectedActionOf<Action>>,
+    Action
+>
+
+/**
+ * Wait for an async thunk dispatch and turn its fulfilled/rejected action into a discriminated
+ * result. Unlike `.unwrap()`, rejection is returned as `{ ok: false }` rather than thrown.
+ */
+export const settleThunk = async <Action extends SettledThunkAction>(
+    request: PromiseLike<Action>
+): Promise<ThunkResultFor<Action>> => {
+    const action = await request
+
+    if (action.meta.requestStatus === 'fulfilled') {
+        const fulfilledAction = action as FulfilledActionOf<Action>
+        return {
+            ok: true,
+            value: fulfilledAction.payload,
+            action: fulfilledAction,
+        } as ThunkResultFor<Action>
+    }
+
+    const rejectedAction = action as RejectedActionOf<Action>
+    return {
+        ok: false,
+        error: rejectedAction.meta.rejectedWithValue
+            ? rejectedAction.payload
+            : rejectedAction.error,
+        action: rejectedAction,
+    } as ThunkResultFor<Action>
+}
+
 type OnlyObject<T> = Extract<T, Record<string, any>>
 
 // `B` wins on overlapping keys. Written as `Omit<A, keyof B> & B` rather than a mapped type

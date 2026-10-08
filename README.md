@@ -217,6 +217,50 @@ That's the whole wiring. `mapThunksToState` drops each thunk's payload into a st
 plain import from the package, not part of the factory; both methods are covered in full under
 [`sliceHelper`](#slicehelper).
 
+## `settleThunk` — handle dispatch results as values
+
+Redux Toolkit dispatches resolve to a fulfilled or rejected action. Checking one imperatively
+normally means reaching back to the thunk's action creator:
+
+```ts
+const action = await dispatch(thunks.createUser(data))
+
+if (thunks.createUser.fulfilled.match(action)) {
+    closeDialog()
+}
+```
+
+`settleThunk` turns that action union into a result whose `ok` field TypeScript can discriminate:
+
+```ts
+import { settleThunk } from '@kallinen/thunk-utility'
+
+const result = await settleThunk(dispatch(thunks.createUser(data)))
+
+if (result.ok) {
+    result.value // the createUser fulfilled payload, fully inferred
+    closeDialog()
+} else {
+    result.error // rejectWithValue payload, or RTK's serialized thrown error
+}
+```
+
+Unlike `.unwrap()`, `settleThunk` does not throw when the thunk is rejected. A successful thunk
+whose payload is `undefined` — for example, an operation backed by a `204 No Content` response —
+still returns `{ ok: true, value: undefined }`.
+
+Both branches also expose the original `action`, including `meta.arg`, `meta.requestId`, abort and
+condition information. `settleThunk` waits for an already-dispatched request; it does not dispatch,
+show notifications or run callbacks. Keep the original request when you need to cancel it:
+
+```ts
+const request = dispatch(thunks.getUser(5))
+const resultPromise = settleThunk(request)
+
+request.abort()
+const result = await resultPromise
+```
+
 ## `apiThunkFor`
 
 Wraps an api-client function. It reads the function's metadata (`__meta.key` + the `apiMetadata`
