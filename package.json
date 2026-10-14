@@ -40,7 +40,9 @@
         "build": "tsup --tsconfig tsconfig.production.json src --format cjs,esm --dts --out-dir lib",
         "test": "cross-env NODE_ENV=test jest --detectOpenHandles --config ./jest.config.js --colors --verbose --forceExit",
         "format": "prettier --write \"src/**/*.ts\"",
-        "prepublishOnly": "npm run test && npm run build"
+        "prepublishOnly": "npm run test && npm run build",
+        "preversion": "npm run test && npm run build",
+        "release": "npm version"
     },
     "repository": {
         "type": "git",
